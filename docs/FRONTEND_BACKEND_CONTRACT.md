@@ -2,10 +2,36 @@
 
 **Proyecto:** SEÑAVIDA — Plataforma de comunicación inclusiva en salud
 **Documento:** Contrato oficial Frontend ↔ Backend
-**Versión del contrato:** `1.0.0-draft`
-**Estado:** Borrador sujeto a ratificación (ver §20)
+**Versión del contrato:** `2.0.0` — arquitectura **API REST**
+**Estado:** Vigente. Decisiones de arquitectura ratificadas por el equipo y el docente (ver §Decisiones de arquitectura).
 **Fuente:** `BACKEND_IMPLEMENTATION_GUIDE.md` — auditoría del frontend en el commit `41360a8`
-**Fecha:** 2026-07-30
+**Fecha:** 2026-08-05
+
+---
+
+## Decisiones de arquitectura (v2.0.0) — RATIFICADAS
+
+Este contrato pasó de un modelo **Inertia + sesión con cookie** (v1) a un modelo
+**API REST desacoplada** (v2). El cambio responde a la realidad del equipo: el
+**backend** y el **frontend** los desarrollan **personas distintas, en
+repositorios y despliegues separados**. Una API REST desacoplada es el patrón
+correcto para ese modo de trabajo, y fue aprobado por el docente.
+
+| # | Decisión | Valor ratificado |
+|---|---|---|
+| A-01 | Estilo de integración | **API REST** — backend y frontend son proyectos separados que se comunican por HTTP/JSON |
+| A-02 | Autenticación del personal de salud | **Laravel Sanctum — API token (Bearer)** |
+| A-03 | Autenticación del paciente | **Bearer token derivado del código CTA**, acotado a la sesión médica y con su misma vigencia |
+| A-04 | Versionado | **Obligatorio para toda la API** — prefijo `/api/v1` sin excepciones |
+| A-05 | Formato de respuesta | **Envoltorio estándar** con `success`, `data`, `error`, `meta` (§4) |
+| A-06 | Casing en el cable | **`camelCase`** en JSON; `snake_case` solo para valores de enum (§2.3) |
+| A-07 | Documentación de la API | **Swagger / OpenAPI** publicada por el backend (§Documentación de la API) |
+| A-08 | Almacenamiento del token en el cliente | El frontend guarda el Bearer token y lo envía en la cabecera `Authorization` en cada petición |
+
+> **Nota histórica.** Las menciones a *Inertia*, *props compartidas*, *cookie de
+> sesión* y *protección CSRF* que puedan quedar en secciones no reescritas
+> corresponden al modelo v1 y **quedan derogadas** por estas decisiones. Ante
+> cualquier contradicción, **prevalece esta sección**.
 
 ---
 
@@ -161,46 +187,57 @@ Estos cinco principios resuelven las dudas que el contrato no anticipe:
 
 ### 2.1 Base URL de la API
 
-`DECISIÓN PENDIENTE — D-01`
+**RATIFICADO (A-01, A-04).**
 
-El frontend actual **no tiene ninguna URL de backend configurada**. Su
-`.env.example` contiene únicamente una variable residual (`APP_URL`) heredada de
-la herramienta con la que se generó el prototipo. No existe `VITE_API_URL` ni
-equivalente. Por lo tanto no hay una base URL observada que documentar.
+Bajo la arquitectura API REST, **el frontend es un cliente HTTP puro** (React +
+Vite, proyecto separado) que consume el backend a través de una **única base
+URL** configurada por variable de entorno (`VITE_API_URL`).
 
-**PROPUESTO** — a ratificar:
-
-| Entorno | Base URL |
+| Entorno | Base URL del backend |
 |---|---|
 | Desarrollo local | `http://localhost:8000` |
 | Integración | `https://integracion.senavida.cl` |
 | Producción | `https://senavida.cl` |
 
-**Prefijos de ruta:**
+**Prefijo de ruta — único para toda la API:**
 
 | Consumidor | Prefijo | Transporte |
 |---|---|---|
-| Dashboards del personal | *(sin prefijo)* | Inertia sobre sesión web |
-| Portal del paciente | `/api/v1` | Token acotado a la sesión médica |
-| Integraciones futuras | `/api/v1` | Token |
-| Broadcasting | `/broadcasting/auth` | Autorización de canal |
+| Personal de salud (dashboards) | `/api/v1` | **Bearer token (Sanctum)** |
+| Portal del paciente | `/api/v1` | **Bearer token derivado del CTA** |
+| Integraciones futuras | `/api/v1` | Bearer token |
+| Broadcasting (tiempo real) | `/api/v1/broadcasting/auth` | Autorización de canal con el token del portador |
+
+Toda ruta de negocio vive bajo `{{VITE_API_URL}}/api/v1/...`. **No existen rutas
+sin prefijo:** con API REST desaparecen las rutas Inertia del personal que la v1
+dejaba sin versionar.
+
+**Ejemplos de URL completas:**
+
+```
+http://localhost:8000/api/v1/auth/login
+http://localhost:8000/api/v1/patients/{patientId}
+http://localhost:8000/api/v1/medical-sessions/{sessionId}/vital-signs
+```
 
 **Regla:** el frontend **NO DEBE** hardcodear ninguna URL absoluta. Todas las
-rutas se resuelven mediante el generador de rutas del framework o mediante una
-única variable de entorno. Esta regla existe porque el prototipo actual tiene
-literales dispersos por todo el código.
+peticiones se construyen a partir de la variable `VITE_API_URL` y de rutas
+relativas. Esta regla existe porque el prototipo original tenía literales
+dispersos por todo el código.
 
 ### 2.2 Versionado
 
-**PROPUESTO.**
+**RATIFICADO (A-04).**
 
-**Versionado de la API** — por prefijo de ruta:
+**Versionado de la API** — por prefijo de ruta, **obligatorio para todos los
+endpoints sin excepción**:
 
 - Formato: `/api/v{major}` — por ejemplo `/api/v1`.
 - Solo se incrementa el major ante **cambios rompientes**.
 - Al publicar `v2`, `v1` **DEBE** mantenerse operativa un mínimo de 90 días.
-- Las rutas Inertia del personal **no se versionan**: frontend y backend se
-  despliegan juntos.
+- Bajo API REST, **backend y frontend se despliegan por separado**; por eso el
+  versionado protege al frontend de cambios rompientes del backend. **Todas** las
+  rutas se versionan (ya no hay rutas Inertia exentas).
 
 **Se considera cambio rompiente:**
 
@@ -398,69 +435,92 @@ real**:
   reautenticación**.
 
 Nada de lo anterior es un mecanismo de autenticación que este contrato pueda
-documentar. Toda esta sección es, por tanto, **PROPUESTO** y define lo que debe
-construirse desde cero.
+documentar. Toda esta sección define lo que debe construirse desde cero, **bajo
+el modelo API REST con Laravel Sanctum (Bearer token)** ratificado en A-02/A-03.
 
 ### 3.2 Método por consumidor
 
-El sistema tiene **dos consumidores con necesidades distintas** y este contrato
-los trata de forma separada.
+El sistema tiene **dos consumidores** y ambos se autentican con **Bearer token de
+Sanctum**, emitido por el backend y enviado por el cliente en la cabecera
+`Authorization`. La diferencia está en cómo se obtiene el token y en su vigencia.
 
-| Consumidor | Método | Fundamento |
+| Consumidor | Método | Vigencia |
 |---|---|---|
-| **Personal de salud** | Sesión web con cookie `HttpOnly` | Navegador institucional, misma máquina durante el turno |
-| **Paciente** | `DECISIÓN PENDIENTE — D-02` | Dispositivo personal, acceso efímero ligado a una atención |
+| **Personal de salud** | Sanctum API token, obtenido con email + contraseña | Larga; se revoca en logout |
+| **Paciente** | Sanctum token derivado del **código CTA**, sin contraseña | Acotada a la sesión médica; expira con ella |
 
-#### Personal de salud — sesión con cookie
+**Transporte del token — común a ambos:**
 
 | Atributo | Valor |
 |---|---|
-| Transporte | Cookie de sesión |
-| `HttpOnly` | `true` — inaccesible desde JavaScript |
-| `Secure` | `true` — obligatorio en integración y producción |
-| `SameSite` | `Lax` |
-| Almacenamiento en el cliente | **Ninguno.** El frontend **NO DEBE** guardar credenciales ni tokens en `localStorage` ni `sessionStorage` |
+| Cabecera | `Authorization: Bearer {token}` |
+| Emisión | El backend crea el token con Sanctum (`createToken`) en el login y lo devuelve **una sola vez** en el cuerpo de la respuesta |
+| Almacenamiento en el cliente | El frontend guarda el token (A-08) y lo adjunta en cada petición autenticada |
+| Revocación | En logout el backend **DEBE** eliminar el token del portador (`delete` del `accessToken`) |
+| `GET` de recursos protegidos | También requieren el `Authorization` |
 
-#### Paciente — `DECISIÓN PENDIENTE — D-02` 🔴
+> **Seguridad.** Como el token viaja en el cuerpo/cabecera y no en cookie, **no
+> se usa CSRF** (§3.6 derogada). El backend **DEBE** servirse siempre sobre HTTPS
+> en integración y producción para proteger el token en tránsito. El frontend
+> **NO DEBE** exponer el token en la URL ni en logs.
 
-Esta decisión **bloquea la implementación** y debe resolverse antes de escribir
-la primera línea del backend. Opciones evaluadas:
+#### Paciente — token derivado del código CTA (A-03)
 
-| Opción | Descripción | A favor | En contra |
-|---|---|---|---|
-| **A. Token derivado del código de atención** | El código entregado en ventanilla se canjea por un token acotado a esa sesión médica y con la misma vigencia | Coherente con el flujo presencial que el propio producto describe; sin gestión de contraseñas; expira solo | El paciente pierde acceso al cerrarse la atención |
-| **B. Cuenta permanente** | El paciente se registra con credenciales propias | Historial entre atenciones; ficha editable por su titular | Barrera de entrada en urgencias; gestión de recuperación de credenciales |
-| **C. Enlace mágico por SMS** | Enlace de un solo uso al teléfono registrado | Sin contraseñas | Depende de cobertura y de proveedor de mensajería en un contexto de urgencia |
+El código entregado en ventanilla (`TemporaryAccessCode`) se **canjea** por un
+Bearer token de Sanctum:
 
-**Recomendación de este contrato: opción A**, por ser la única coherente con el
-flujo que la interfaz ya describe —código intransferible, de un solo uso,
-entregado en presencia física. Requiere ratificación formal.
+- El paciente envía su código CTA a `POST /api/v1/auth/patient/redeem`.
+- El backend valida el código (existencia, vigencia, no usado) y, si es válido,
+  emite un token acotado a **esa** sesión médica.
+- El token **hereda la vigencia de la sesión médica**: al cerrarse o expirar la
+  atención (§3.7), el token queda revocado y el paciente pierde acceso.
+- El token del paciente **solo** habilita los endpoints del portal del paciente
+  para su propia sesión médica; nunca endpoints del personal.
 
 ### 3.3 Flujo de login — personal
 
 ```
-1. GET  /login
-        → Backend entrega la vista y establece la protección CSRF
-
-2. POST /login
+1. POST /api/v1/auth/login
         → { email, password, healthCenterId, unitId }
 
-3. Backend valida, en este orden:
+2. Backend valida, en este orden:
         a) Formato de los campos              → 422 si falla
         b) Límite de intentos                 → 429 si se supera
         c) Credenciales                       → 422 si no coinciden
         d) Usuario activo (isActive)          → 403 si está inactivo
         e) Pertenencia al centro y unidad     → 403 si no corresponde
 
-4. Éxito:
-        → Regenera el identificador de sesión (anti session-fixation)
+3. Éxito:
+        → Emite un Sanctum token con createToken()
         → Registra evento de auditoría 'login'
-        → Redirige a la vista inicial del rol
-        → Expone el contexto en las props compartidas
+        → Responde 200 con el token y el contexto del usuario (envoltorio §4)
 ```
 
-**Contexto expuesto tras el login** — el frontend lo necesita para el
-encabezado, el menú y el ocultamiento de controles:
+**Respuesta de login (éxito) — forma:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "12|aBcD3f...opaco...",
+    "tokenType": "Bearer",
+    "user": {
+      "id": "9d3f7a12-4c8b-4e21-9f0a-2b7c1d5e8a34",
+      "name": "María Torres",
+      "role": "medico",
+      "roleLabel": "Médico",
+      "healthCenterId": "…",
+      "healthCenterName": "…",
+      "unitId": "…",
+      "unitName": "…",
+      "permissions": ["…"]
+    }
+  }
+}
+```
+
+**Contexto devuelto tras el login** — el frontend lo necesita para el encabezado,
+el menú y el ocultamiento de controles:
 
 | Campo | Uso en la interfaz |
 |---|---|
@@ -482,62 +542,66 @@ el backend a partir de la cuenta autenticada. El cliente **NO DEBE** enviar rol
 en el login, y si lo envía el backend **DEBE ignorarlo**. Esto elimina de raíz el
 selector de rol del prototipo.
 
+**Endpoint del usuario autenticado.** El frontend PUEDE recuperar el contexto en
+cualquier momento con `GET /api/v1/auth/me` (requiere Bearer token), útil al
+recargar la aplicación cuando ya tiene un token guardado.
+
 ### 3.4 Logout
 
 ```
-POST /logout
+POST /api/v1/auth/logout    (requiere Bearer token)
 ```
 
 | Requisito | Detalle |
 |---|---|
-| Autenticación | Requerida |
-| Invalidación | La sesión **DEBE** invalidarse **en el servidor**. No basta con borrar la cookie |
-| Cookie | Debe expirarse explícitamente |
+| Autenticación | Requerida (Bearer token) |
+| Invalidación | El backend **DEBE** eliminar el token del portador en el servidor (`currentAccessToken()->delete()`). No basta con que el cliente lo borre |
 | Auditoría | Registra evento `logout` |
-| Respuesta | Redirección a la portada pública |
-| Idempotencia | Un logout sin sesión activa **DEBE** responder igual, sin error |
+| Respuesta | `200` con envoltorio `success: true` (o `204`); el frontend descarta su token local |
+| Idempotencia | Un logout sin token válido **DEBE** responder de forma controlada (`401`), sin error de servidor |
 
 **Regla vinculante — el logout no cierra la atención.** Cerrar sesión de usuario
 **NO DEBE** cerrar la sesión médica en curso. Son ciclos de vida independientes:
 el personal cambia de turno mientras la atención del paciente continúa. Cerrar
 una atención es una acción clínica explícita y distinta (§11.3).
 
-### 3.5 Manejo de sesión
+### 3.5 Manejo del token
 
 | Aspecto | Regla |
 |---|---|
-| Almacenamiento del estado | En el servidor. La cookie transporta únicamente el identificador |
-| Contenido de la cookie | Opaco. **NO DEBE** contener rol, permisos ni datos del usuario |
-| Regeneración | Al iniciar sesión y al cambiar el nivel de privilegio |
-| Sesiones concurrentes | `DECISIÓN PENDIENTE — D-03`: ¿se permite el mismo usuario en varios dispositivos? |
-| Cambio de rol | **Imposible dentro de una sesión.** Requiere cerrar e iniciar sesión de nuevo |
+| Estado en el servidor | Sanctum persiste los tokens en la tabla `personal_access_tokens`. El backend puede revocarlos individualmente |
+| Contenido del token | **Opaco.** El frontend NO DEBE parsearlo ni inferir nada de su texto |
+| Datos de usuario | NO viajan dentro del token; se obtienen de `GET /api/v1/auth/me` |
+| Sesiones concurrentes | Permitidas por defecto: un usuario PUEDE tener varios tokens activos (varios dispositivos). Cada logout revoca solo el token usado |
+| Cambio de rol | **Imposible con el mismo token.** Requiere cerrar sesión y volver a autenticarse |
 
 > **Distinción terminológica de uso obligatorio en todo el proyecto.** El
 > término «sesión» es ambiguo en este dominio y su confusión ya generó errores en
 > el prototipo. Este contrato exige distinguir siempre:
 >
-> - **Sesión de usuario** — autenticación de una persona ante el sistema.
+> - **Sesión de usuario** — autenticación de una persona (su Bearer token).
 > - **Sesión médica** (`MedicalSession`) — la atención clínica de un paciente.
 >
 > No comparten ciclo de vida, ni caducidad, ni responsable.
 
-### 3.6 Protección CSRF
+### 3.6 Protección CSRF — DEROGADA
 
-Al usarse cookies para el personal, la protección CSRF es **obligatoria**.
+Bajo API REST con **Bearer token** (no cookies), **la protección CSRF no
+aplica**. CSRF protege peticiones que el navegador autentica automáticamente por
+cookie; un Bearer token debe adjuntarse explícitamente en cada petición, por lo
+que el vector CSRF desaparece.
+
+En su lugar rigen:
 
 | Aspecto | Regla |
 |---|---|
-| Alcance | Todo método que muta estado: `POST`, `PUT`, `PATCH`, `DELETE` |
-| Mecanismo | Token CSRF emitido por el backend |
-| Transporte | Cabecera `X-CSRF-TOKEN` o campo del formulario |
-| Token ausente o inválido | **419** (§5.12) |
-| `GET` | Exento — los `GET` **NO DEBEN** mutar estado |
-| Endpoints con token (portal del paciente) | Exentos de CSRF, protegidos por la propia autenticación |
+| Autenticación de toda mutación (`POST`/`PUT`/`PATCH`/`DELETE`) | Cabecera `Authorization: Bearer {token}` válida |
+| Token ausente o inválido | **401** (§5.5) |
+| Token válido sin permiso para la acción | **403** (§5.6) |
+| Transporte | HTTPS obligatorio en integración y producción |
 
-**Manejo obligatorio en el frontend.** Ante un **419**, el frontend **DEBE**
-recuperar un token nuevo y reintentar **una sola vez**. Si vuelve a fallar, DEBE
-informar al usuario que su sesión expiró e invitarlo a reingresar. **NO DEBE**
-reintentar en bucle.
+> El código **419 Page Expired** (propio del CSRF de sesión) **deja de usarse**
+> en esta arquitectura.
 
 ### 3.7 Expiración de sesión
 
@@ -572,20 +636,21 @@ Requisitos vinculantes:
 cliente conectado. Un paciente que cierra el navegador no impide que su atención
 expire.
 
-### 3.8 Renovación de sesión
+### 3.8 Vigencia y renovación del token
 
 | Aspecto | Regla |
 |---|---|
-| Renovación | Automática ante cualquier petición autenticada |
-| Renovación explícita | No se requiere endpoint dedicado |
-| Notificación previa | El backend **DEBERÍA** exponer `session.expiresAt` para que el frontend avise antes de expirar |
-| Expiración durante el uso | El backend responde **401**; el frontend **DEBE** redirigir al acceso preservando el destino original |
+| Vigencia del token de personal | El token permanece válido hasta el logout o su revocación. PUEDE configurarse una expiración por inactividad vía `config/sanctum.php` (`expiration`) |
+| Renovación | No se requiere endpoint dedicado; mientras el token sea válido, el acceso continúa |
+| Token del paciente | Su vigencia está atada a la sesión médica: al expirar o cerrarse la atención, el backend **DEBE** revocar el token |
+| Token inválido o expirado | El backend responde **401**; el frontend **DEBE** descartar el token, redirigir al acceso y preservar el destino original |
 | Pérdida de datos | El frontend **DEBERÍA** preservar el contenido no enviado de formularios largos —nota clínica, resumen de egreso— para no perder trabajo clínico |
 
-**Regla vinculante — la actividad de la sesión médica es independiente.** Una
-petición autenticada renueva la sesión **de usuario**. Solo los mensajes de chat
-renuevan la sesión **médica**. Un profesional consultando la pantalla sin
-interactuar con el paciente no impide que la atención expire por inactividad.
+**Regla vinculante — la actividad de la sesión médica es independiente.** Que el
+token del personal siga válido **no** mantiene viva la sesión médica. Solo los
+mensajes de chat renuevan la sesión **médica**. Un profesional consultando la
+pantalla sin interactuar con el paciente no impide que la atención expire por
+inactividad (§3.7).
 
 ---
 
@@ -601,7 +666,7 @@ imprevistas.
 |---|---|---|
 | **Éxito** | La operación se completó | 200, 201 |
 | **Error de validación** | El payload no cumple las reglas | 422 |
-| **Error general** | Cualquier otro fallo | 400, 401, 403, 404, 409, 419, 429, 500, 503 |
+| **Error general** | Cualquier otro fallo | 400, 401, 403, 404, 409, 429, 500, 503 |
 
 Un **204** no tiene cuerpo y queda fuera de estas tres formas.
 
@@ -895,14 +960,12 @@ existe.
 **Distinción con 422:** 422 es «estos datos son inválidos en cualquier
 circunstancia»; 409 es «estos datos serían válidos, pero no en el estado actual».
 
-### 5.9 `419 Page Expired`
+### 5.9 `419 Page Expired` — NO APLICA en API REST
 
-**Cuándo:** token CSRF ausente, inválido o vencido.
-
-**Acción del frontend:** obtener un token nuevo y reintentar **una sola vez**.
-
-> Código no estándar, propio del framework previsto. Se incluye en el contrato
-> porque el frontend debe tratarlo de forma específica y distinta a 401.
+Este código pertenecía al modelo de **sesión con cookie + CSRF** (v1). Bajo
+**Bearer token** (v2) **no se emite**. Un token ausente, inválido o vencido se
+señala con **401** (§5.5). Se conserva la numeración de la sección solo por
+trazabilidad histórica.
 
 ### 5.10 `422 Unprocessable Entity`
 
@@ -981,7 +1044,7 @@ depende de terceros cuya caída no debe presentarse como error genérico.
 | 403 | Sin permiso | ✅ | ❌ |
 | 404 | No encontrado | ✅ | ❌ |
 | 409 | Conflicto de estado | ✅ | ❌ → recargar |
-| 419 | CSRF expirado | ✅ | ✅ una vez |
+| ~~419~~ | *No aplica en API REST — usar 401* | — | — |
 | 422 | Validación fallida | ✅ | ❌ → corregir |
 | 429 | Demasiadas peticiones | ✅ | ✅ tras `Retry-After` |
 | 500 | Error del servidor | ✅ | ⚠️ solo lecturas |
@@ -1472,8 +1535,8 @@ roles lo pueden invocar.
 
 **Reglas transversales aplicables a todos los recursos:**
 
-1. Todo recurso autenticado exige **sesión válida** (§3) y **token CSRF** en
-   métodos de mutación (§3.6).
+1. Todo recurso autenticado exige un **Bearer token válido** (§3) en la
+   cabecera `Authorization`, tanto en lecturas como en mutaciones.
 2. Todo recurso que opere sobre datos clínicos aplica **aislamiento por centro de
    salud**: si el recurso pertenece a otro centro, se responde 404 (§5.7).
 3. Todo recurso de **escritura** bajo una sesión médica exige que esa sesión esté
@@ -1995,7 +2058,7 @@ correspondencias fijas en el cliente que se desactualizan. Casos obligatorios:
 
 ### 9.2 Contexto de usuario
 
-`GET /me` y props compartidas tras el acceso:
+`GET /api/v1/auth/me` — contexto del usuario autenticado (respuesta JSON):
 
 ```json
 {
@@ -2161,7 +2224,7 @@ cada nivel:
 ```
 1. Formato de la petición          → 400
 2. Autenticación                   → 401
-3. Protección CSRF                 → 419
+3. Autenticación por Bearer token → 401
 4. Límite de frecuencia            → 429
 5. Autorización por rol            → 403
 6. Aislamiento por centro          → 404
@@ -2586,7 +2649,7 @@ esta sección son responsabilidad del backend.
 | Requisito |
 |---|
 | **TLS obligatorio** en integración y producción. Sin excepciones |
-| Cookies con `Secure` y `HttpOnly` |
+| Tokens Sanctum transportados solo por HTTPS; revocables en el servidor |
 | Contraseñas con función de derivación de clave adaptativa. **Nunca** resúmenes simples |
 | Códigos de atención almacenados solo como resumen criptográfico |
 | Notas clínicas con resumen criptográfico de contenido, para detectar alteraciones |
@@ -3026,7 +3089,7 @@ cambian con una versión mayor. El frontend **DEBE** ramificar por ellos y
 | `SESSION_EXPIRED` | 401 | La sesión de usuario venció |
 | `INVALID_CREDENTIALS` | 422 | Credenciales incorrectas |
 | `USER_INACTIVE` | 403 | La cuenta está desactivada |
-| `CSRF_TOKEN_MISMATCH` | 419 | Token CSRF ausente o inválido |
+| `UNAUTHENTICATED` | 401 | Bearer token ausente, inválido o revocado |
 
 #### Autorización
 
@@ -3080,7 +3143,7 @@ cambian con una versión mayor. El frontend **DEBE** ramificar por ellos y
 | `code` / HTTP | Acción |
 |---|---|
 | 401, `SESSION_EXPIRED` | Redirigir al acceso preservando el destino |
-| 419 | Renovar token y reintentar **una vez** |
+| 401 | Descartar el token, redirigir al acceso y preservar el destino |
 | 403 | Mostrar el mensaje. **No** reintentar ni redirigir |
 | 404 | Mostrar estado de recurso no disponible |
 | 409 | Mostrar el mensaje y **recargar** para reconciliar el estado |
@@ -3095,7 +3158,7 @@ cambian con una versión mayor. El frontend **DEBE** ramificar por ellos y
 | Regla |
 |---|
 | **NO DEBE** reintentar automáticamente operaciones de escritura clínica: duplicaría registros |
-| **NO DEBE** reintentar en bucle ante 419 |
+| **NO DEBE** reintentar en bucle ante 401 |
 | **NO DEBE** ocultar errores al usuario |
 | **DEBE** preservar el contenido no enviado de formularios largos ante un error |
 | **DEBE** tolerar valores de enum desconocidos degradando con elegancia |
@@ -3289,6 +3352,50 @@ No basta con registrarlos. **DEBEN** generar notificación al equipo responsable
 
 ---
 
+## 19bis. Documentación de la API — Swagger / OpenAPI (A-07)
+
+**RATIFICADO.** El backend **DEBE** publicar la documentación de la API en
+formato **OpenAPI 3** y exponer una interfaz navegable **Swagger UI**. Es la
+fuente de verdad ejecutable del contrato: el frontend consulta ahí la forma real
+de cada endpoint, y la evaluación puede verificarla.
+
+| Aspecto | Regla |
+|---|---|
+| Estándar | OpenAPI 3.x |
+| Interfaz | Swagger UI navegable |
+| Ruta sugerida | `GET /api/documentation` (Swagger UI) y `GET /api/v1/openapi.json` (especificación) |
+| Herramienta sugerida en Laravel | `darkaonline/l5-swagger` (genera OpenAPI desde anotaciones en los controladores) |
+| Cobertura | **DEBE** documentar todos los endpoints de `/api/v1`: método, ruta, parámetros, cuerpo de request, respuestas por código HTTP y esquema de autenticación (Bearer) |
+| Autenticación en la doc | Debe declararse el esquema `bearerAuth` para poder probar endpoints protegidos desde Swagger UI |
+| Mantenimiento | La documentación **DEBE** regenerarse cuando cambie un endpoint; una respuesta real que no coincida con la doc es un defecto |
+
+**Ejemplo de anotación (referencia, no normativa):**
+
+```php
+/**
+ * @OA\Post(
+ *   path="/api/v1/auth/login",
+ *   tags={"Auth"},
+ *   summary="Inicia sesión y devuelve un Bearer token",
+ *   @OA\RequestBody(required=true,
+ *     @OA\JsonContent(required={"email","password"},
+ *       @OA\Property(property="email", type="string", format="email"),
+ *       @OA\Property(property="password", type="string", format="password")
+ *     )
+ *   ),
+ *   @OA\Response(response=200, description="Token emitido"),
+ *   @OA\Response(response=422, description="Credenciales inválidas")
+ * )
+ */
+```
+
+> **Alcance para la evaluación.** Swagger es una mejora profesional acordada por
+> el equipo. Se prioriza documentar primero los endpoints que cubre la rúbrica
+> (autenticación, registro de usuario, y los recursos con modelos), y luego el
+> resto.
+
+---
+
 ## 20. Pendientes
 
 ### 20.1 Cómo usar esta sección
@@ -3305,11 +3412,16 @@ contrato.
 
 | # | Decisión | Bloquea | Sección |
 |---|---|---|---|
-| **D-02** | **Mecanismo de autenticación del paciente.** Hoy el portal no autentica en absoluto. Opciones: token derivado del código de atención *(recomendada)*, cuenta permanente, o enlace por SMS | Todo el portal del paciente, sus permisos, su canal de tiempo real y el modelo de identidad | §3.2 |
 | **D-07** | **Unificación de la máquina de estados.** El frontend mantiene un estado enumerado de nueve valores —de los que solo produce tres— y una etapa de texto libre, que codifican información solapada | Modelo de la sesión médica, transiciones, validaciones de estado | §6, §11.2 |
 
-> La decisión sobre nomenclatura del cable, que también bloqueaba, **queda
-> resuelta** en §2.3: `camelCase`.
+> **Decisiones antes bloqueantes, ahora RESUELTAS (v2.0.0):**
+> - **D-01 — Base URL / arquitectura:** resuelta. API REST con base URL por
+>   `VITE_API_URL` y prefijo único `/api/v1` (§2.1).
+> - **D-02 — Autenticación del paciente:** resuelta. Bearer token de Sanctum
+>   derivado del código CTA, acotado a la sesión médica (§3.2, A-03).
+> - **Nomenclatura del cable:** resuelta en §2.3: `camelCase`.
+> - **Estilo de integración y autenticación del personal:** resueltas en las
+>   Decisiones de arquitectura (A-01, A-02).
 
 ### 20.3 Alto impacto 🟠
 

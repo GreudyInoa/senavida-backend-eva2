@@ -2,8 +2,16 @@
 
 **Proyecto:** SEÑAVIDA — Plataforma de comunicación inclusiva en salud
 **Documento:** Requisitos del backend
-**Versión:** 1.0
-**Fecha:** 2026-07-30
+**Versión:** 2.0 — arquitectura **API REST**
+**Fecha:** 2026-08-05
+
+> **Arquitectura del proyecto (v2).** El backend se construye como una **API REST**
+> en **Laravel 12 + PostgreSQL**, con autenticación **Laravel Sanctum (Bearer
+> token)**. El frontend (React + Vite) es un **proyecto separado**, desarrollado
+> por otra persona, que consume esta API. Todas las rutas viven bajo `/api/v1` y
+> las respuestas son JSON con un envoltorio estándar. Estas decisiones fueron
+> ratificadas por el equipo y el docente. El detalle normativo está en
+> `FRONTEND_BACKEND_CONTRACT.md` (v2.0.0).
 
 ---
 
@@ -180,18 +188,25 @@ Es igual de importante saber qué queda fuera:
 > La idea es proteger la autonomía del paciente, es decir, su derecho a decidir
 > sobre sus propios datos.
 
-### 2.3 Dos decisiones que faltan por tomar
+### 2.3 Decisiones de arquitectura y lo que queda por resolver
 
-Hay dos preguntas que **nadie ha respondido todavía** y que hay que resolver
-antes de empezar a construir. No son detalles menores: bloquean el trabajo.
+**Ya resueltas (v2).** El equipo y el docente ratificaron el modelo **API REST**:
 
-| # | Pregunta | Por qué bloquea |
+| Tema | Decisión |
+|---|---|
+| Cómo se comunican frontend y backend | API REST — proyectos separados, JSON sobre HTTP |
+| Cómo entra el **personal** | Sanctum, con email y contraseña, que devuelve un **Bearer token** |
+| Cómo entra el **paciente** | Un **Bearer token derivado de su código de atención (CTA)**, que expira cuando termina la atención. Ya no queda sin resolver |
+| Versionado, respuestas, casing, documentación | `/api/v1`, envoltorio estándar, `camelCase`, Swagger |
+
+**Lo que todavía falta decidir:**
+
+| # | Pregunta | Por qué importa |
 |---|---|---|
-| **1** | ¿Cómo demuestra el paciente que es él quien entra al portal? | Hoy el portal del paciente no pide **ninguna** credencial. Sin resolver esto, no se puede construir nada del portal |
-| **2** | ¿Cómo se representa el avance de una atención médica? | El frontend usa **dos formas distintas** de representar lo mismo, y se contradicen entre sí |
+| **1** | ¿Cómo se representa el avance de una atención médica? | El frontend usa **dos formas distintas** de representar lo mismo (un estado y una etapa) y se contradicen entre sí. Hay que unificarlo antes de modelar la sesión médica |
 
-Estas dos preguntas se repiten en la sección 8, donde se explica qué pasa si no
-se responden.
+Esta pregunta se retoma en la sección 8, donde se explica qué pasa si no se
+responde.
 
 ---
 
@@ -1397,9 +1412,11 @@ dirección, previsión, alergias, enfermedades y conversaciones clínicas.
 | RNF-03 | Separación entre hospitales | Un hospital nunca ve los datos de otro. Este filtro debe aplicarse de forma general y automática, no revisarse a mano en cada parte |
 | RNF-04 | Cada rol ve solo lo suyo | El sistema no solo controla si alguien puede entrar a una pantalla, sino **qué datos concretos recibe**. Al administrador no se le envía información clínica, ni siquiera oculta |
 | RNF-05 | El servidor decide siempre | La pantalla puede esconder botones para que sea más cómodo, pero la decisión real de permitir o no una acción la toma siempre el servidor |
-| RNF-06 | Nada sensible se guarda en el navegador | El sistema no debe guardar contraseñas ni credenciales en el navegador del usuario |
+| RNF-06 | Manejo seguro del token de acceso | Con API REST, el frontend guarda el **token de acceso (Bearer)** para enviarlo en cada petición. Nunca se guardan **contraseñas** en el navegador. El token viaja siempre por conexión cifrada (HTTPS) y el servidor puede revocarlo en cualquier momento (por ejemplo, al cerrar sesión) |
 | RNF-07 | Límite de peticiones | El sistema debe frenar a quien haga demasiadas peticiones seguidas, para protegerse de ataques automáticos |
 | RNF-08 | Los errores no revelan detalles internos | Cuando algo falla, el mensaje debe ser útil pero no mostrar rutas de archivos, consultas ni datos del paciente |
+| RNF-09 | Permisos de origen cruzado (CORS) | Como el frontend y el backend están en direcciones distintas, el backend debe autorizar explícitamente las peticiones del frontend. Sin esto, el navegador las bloquea |
+| RNF-10 | Documentación de la API | El backend publica su documentación con **Swagger/OpenAPI**, para que el frontend y el docente vean cómo funciona cada endpoint y puedan probarlo |
 
 > **Un ejemplo de RNF-04 que ayuda a entenderlo.** El administrador de TI
 > gestiona la plataforma, pero **no debe poder ver ninguna información clínica
@@ -1689,16 +1706,17 @@ avanzar en paralelo, sin bloquear al equipo de desarrollo.
 
 ### 6.3 Antes de empezar
 
-Hay **dos decisiones** que deben tomarse antes de escribir la primera línea del
-backend:
+Las decisiones de arquitectura ya están tomadas (API REST, Sanctum con Bearer
+token, `/api/v1`, Swagger — ver la nota del encabezado y la §2.3). Queda **una
+decisión de modelado** por resolver antes de construir la sesión médica:
 
 | # | Decisión | Qué bloquea si no se toma |
 |---|---|---|
-| **1** | Cómo se identifica el paciente al entrar a su portal | Todo el portal del paciente: sus permisos, su chat, sus llamados |
-| **2** | Cómo se representa el avance de una atención | El diseño de la pieza central del sistema |
+| **1** | Cómo se representa el avance de una atención (unificar el «estado» y la «etapa» que hoy se contradicen) | El diseño de la pieza central del sistema: la sesión médica |
 
-> No conviene «empezar mientras se decide». Ambas afectan la base, y avanzar sin
-> resolverlas significa rehacer trabajo más adelante.
+> La identificación del paciente **ya está resuelta**: token derivado del código
+> de atención (CTA). La que queda afecta la base del modelo, así que conviene
+> cerrarla antes de avanzar con las sesiones médicas.
 
 ---
 
@@ -2142,13 +2160,15 @@ agregarlos después.
 
 ### 10.4 Antes de empezar
 
-Quedan **dos preguntas por responder**, y ambas afectan la base del sistema:
+Las decisiones de arquitectura ya están cerradas (API REST, Sanctum con Bearer
+token, `/api/v1`, Swagger). La **identificación del paciente** también: token
+derivado de su código de atención (CTA). Queda **una pregunta de modelado**:
 
-1. ¿Cómo demuestra el paciente que es él quien entra a su portal?
-2. ¿Cómo se representa el avance de una atención médica?
+1. ¿Cómo se representa el avance de una atención médica? (unificar el «estado» y
+   la «etapa» que hoy se contradicen)
 
-Conviene resolverlas primero. Avanzar sin ellas significa rehacer trabajo más
-adelante.
+Conviene resolverla antes de modelar la sesión médica. Avanzar sin ella significa
+rehacer trabajo más adelante.
 
 ### 10.5 Palabras finales
 

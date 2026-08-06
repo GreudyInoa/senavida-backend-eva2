@@ -3,8 +3,29 @@
 **Proyecto:** SEÑAVIDA — Plataforma de comunicación inclusiva en salud
 **Documento:** Guía oficial de implementación del backend
 **Base del análisis:** repositorio `senavida-frontend`, commit `41360a8`
-**Fecha del análisis:** 2026-07-30
-**Destino de la migración:** Laravel + Blade + Inertia.js (React)
+**Fecha del análisis:** 2026-07-30 · **Actualización de arquitectura:** 2026-08-05
+**Destino de la implementación:** **Laravel 12 — API REST** (backend desacoplado) con **PostgreSQL** y **Laravel Sanctum (Bearer token)**. El frontend React/Vite es un proyecto separado que consume la API.
+
+> **Cambio de arquitectura (v2).** Este proyecto lo desarrollan dos personas: una
+> el **backend**, otra el **frontend**, en repositorios separados. Por eso se
+> adoptó una **API REST desacoplada** en lugar de Inertia. Las decisiones
+> ratificadas (por el equipo y el docente) son:
+>
+> | # | Decisión | Valor |
+> |---|---|---|
+> | A-01 | Integración | API REST (proyectos separados) |
+> | A-02 | Auth del personal | Sanctum — Bearer token |
+> | A-03 | Auth del paciente | Bearer token derivado del CTA |
+> | A-04 | Versionado | `/api/v1` para toda la API |
+> | A-05 | Respuestas | Envoltorio `success`/`data`/`error`/`meta` |
+> | A-06 | Casing | `camelCase` en el cable |
+> | A-07 | Documentación | Swagger / OpenAPI |
+>
+> Las menciones a **Inertia**, **Blade como capa de vistas**, **props
+> compartidas** o **sesión con cookie** que queden en el cuerpo del documento
+> corresponden al análisis original y **quedan sustituidas** por el modelo API
+> REST. La §12 fue reescrita en consecuencia. El contrato
+> `FRONTEND_BACKEND_CONTRACT.md` (v2.0.0) es la referencia normativa.
 
 > Este documento es **descriptivo**, no prescriptivo respecto al código. Todo lo
 > que se afirma aquí fue extraído leyendo el repositorio real. Cuando algo **no
@@ -27,7 +48,7 @@
 9. [Roles y permisos](#9-roles-y-permisos)
 10. [Dependencias entre módulos](#10-dependencias-entre-módulos)
 11. [Riesgos encontrados](#11-riesgos-encontrados)
-12. [Recomendaciones para migrar a Laravel + Blade + Inertia](#12-recomendaciones-para-migrar-a-laravel--blade--inertia)
+12. [Recomendaciones para implementar la API REST en Laravel](#12-recomendaciones-para-implementar-la-api-rest-en-laravel)
 13. [Roadmap recomendado del backend](#13-roadmap-recomendado-del-backend)
 
 ---
@@ -102,7 +123,7 @@ pero:
 
 | Capa | Tecnología | Versión declarada | Nota |
 |---|---|---|---|
-| UI | React | `^19.2.7` | Requisito duro de Inertia v3 |
+| UI | React | `^19.2.7` | Frontend separado que consume la API REST |
 | Lenguaje | TypeScript | `^6.0.3` | `strict` **no** activado |
 | Build | Vite | `^7.3.6` | Elegida sobre Vite 8 por compatibilidad con `laravel-vite-plugin` |
 | Estilos | Tailwind CSS | `^4.3.2` | Vía `@tailwindcss/vite`, sin `tailwind.config.js` |
@@ -183,7 +204,7 @@ Características del patrón:
 - **Sin router.** `currentView` es una unión de strings
   (`'landing' | 'login' | 'dashboard'`) y la navegación de la landing es
   `scrollIntoView` sobre anclas (`App.tsx:56-63`). **No hay URLs.** Esto es lo
-  primero que cambia con Inertia.
+  primero que cambia al pasar a rutas REST reales.
 - **Sin store global** (Redux/Zustand/Context). Solo `useState` + prop drilling.
   `DashboardContainer` recibe **18 props**.
 - **Sin capa de servicios.** No hay `api/`, `services/`, ni cliente HTTP.
@@ -1219,19 +1240,22 @@ Formulario público de la landing (`LandingPage.tsx:1022-1076`):
 > derivan de las **acciones de la UI**. Cada fila indica el componente y la línea
 > que la origina.
 >
-> **Convención asumida:** rutas Inertia (`web.php`) para navegación y formularios
-> del personal; rutas `api.php` con Sanctum solo donde se requiera consumo por
-> dispositivo del paciente o tiempo real. Ver §12.3.
+> **Convención (v2, API REST):** **todas** las rutas viven en `routes/api.php`
+> bajo el prefijo `/api/v1` y se protegen con `auth:sanctum` (salvo login, canje
+> de CTA y endpoints públicos). Las rutas de las tablas se listan **sin** el
+> prefijo por brevedad; en la implementación real lo llevan
+> (p. ej. `/login` → `POST /api/v1/auth/login`). Las respuestas usan el
+> envoltorio estándar (§7) y **JSON**, nunca redirects ni props. Ver §12.
 
 ### 6.1 M1 · Autenticación
 
 | # | Método | Ruta | Origen en UI | Envía | Devuelve | Errores a manejar |
 |---|---|---|---|---|---|---|
-| A1 | `POST` | `/login` | `Login.tsx:32` | `email`, `password`, `health_center_id`, `unit_id` | redirect a `/dashboard` + props de sesión | `422` credenciales inválidas · `403` usuario inactivo · `429` rate limit |
-| A2 | `POST` | `/logout` | `DashboardContainer.tsx:174,229,386` | — | redirect a `/` | — |
-| A3 | `GET` | `/me` (o prop compartida `auth.user`) | `App.tsx:29-36` | — | usuario + rol + centro + unidad | `401` |
-| A4 | `POST` | `/forgot-password` | `Login.tsx:176` (hoy `alert`) | `email` | mensaje flash | `422` email no registrado |
-| A5 | `POST` | `/patient/access` | `Login.tsx:34-37` — hoy **sin credenciales** | `DECISIÓN PENDIENTE` | sesión del paciente | ver §11.1 |
+| A1 | `POST` | `/auth/login` | `Login.tsx:32` | `email`, `password`, `healthCenterId`, `unitId` | `{ token, tokenType:"Bearer", user }` (§7.1) | `422` credenciales inválidas · `403` usuario inactivo · `429` rate limit |
+| A2 | `POST` | `/auth/logout` | `DashboardContainer.tsx:174,229,386` | — (Bearer token) | `success: true`; el token se revoca | `401` |
+| A3 | `GET` | `/auth/me` | `App.tsx:29-36` | — (Bearer token) | usuario + rol + centro + unidad + permisos | `401` |
+| A4 | `POST` | `/auth/forgot-password` | `Login.tsx:176` (hoy `alert`) | `email` | `success: true` (respuesta genérica) | `422` |
+| A5 | `POST` | `/auth/patient/redeem` | `Login.tsx:34-37` — hoy **sin credenciales** | `{ ctaCode }` | Bearer token acotado a la sesión médica (A-03) | ver §11.1 |
 
 > 🔴 **Bloqueante A5:** el portal del paciente hoy **no autentica**. El backend
 > debe definir cómo el paciente prueba su identidad. Opciones: (a) el CTA
@@ -1380,27 +1404,28 @@ entera**.
 
 ### 7.0 Convenciones transversales
 
-**Casing.** El frontend usa `camelCase` en todo `types.ts`. El schema propuesto
-usa `snake_case`. `DECISIÓN PENDIENTE` — dos caminos válidos:
+> **Prefijo de rutas.** Todas las rutas de esta sección se muestran **sin** el
+> prefijo por brevedad. En la API real llevan `/api/v1` (p. ej.
+> `POST /medical-sessions/{id}/vital-signs` →
+> `POST /api/v1/medical-sessions/{id}/vital-signs`).
 
-- **(A) `snake_case` en el cable** (idiomático Laravel) y adaptar `types.ts`.
-  Requiere tocar los 11 componentes.
-- **(B) `camelCase` en el cable**, convirtiendo en las API Resources.
-  El frontend **no cambia**.
-
-👉 **Recomendación: (B).** El costo es una sola vez en el backend y evita
-reescribir 6.500 líneas de JSX. El README ya asume que *"solo cambia camelCase →
-snake_case"*, pero esa conversión es exactamente el trabajo que (B) elimina.
+**Casing — RESUELTO: `camelCase` en el cable (A-06).** El frontend usa `camelCase`
+en todo `types.ts`; el backend expone `camelCase` convirtiendo en las **API
+Resources**. Así el frontend no cambia su consumo de datos y la conversión se
+hace una sola vez en la capa de serialización del backend. Los valores de enum
+permanecen en `snake_case` (§2.3 del contrato).
 
 **Fechas.** Todo `ISO 8601 UTC` (`2026-07-12T11:00:00Z`). El frontend parsea con
 `new Date(msg.sentAt)`. ⚠️ **Dos excepciones a corregir en el frontend:**
 `Patient.birthDate` es `'15/11/1997'` y `TimelineEvent.occurredAt` es `'11:00'`.
 
-**Envoltura de respuesta.** El snippet de referencia
-(`backendDoc.ts:332-342`) usa `{status, data}` para éxito y `{status, message,
-code}` para error. Se recomienda mantenerlo, **más** el formato estándar de
-validación de Laravel (`{message, errors:{campo:[...]}}`) para los `422` de
-formulario, que es lo que `useForm` de Inertia consume nativamente.
+**Envoltura de respuesta (A-05).** Formato estándar del contrato (§4): `success`,
+`data`, `error`, `meta`. Para los `422` de validación se usa el objeto `errors`
+(`{campo:[...]}`); el frontend los muestra junto a cada campo.
+
+**Autenticación.** Toda ruta protegida exige `Authorization: Bearer {token}`
+(Sanctum). Un token ausente o inválido responde **401** (no 419: el CSRF de
+sesión no aplica en API REST).
 
 **Errores.** Cada respuesta de error debe traer un `code` legible por máquina
 (`INVALID_CODE`, `BLOCKED_CODE`, `SESSION_NOT_FOUND`, `INACTIVE_SESSION`,
@@ -2207,7 +2232,7 @@ lugares:
 El handler es `handleSandboxRoleSwitch` (`App.tsx:198-201`), que muta el rol del
 usuario en memoria.
 
-👉 **Al migrar, el sidebar debe convertirse en navegación real** (links Inertia a
+👉 **En el frontend, el sidebar debe convertirse en navegación real** (enrutado del cliente a
 rutas distintas) y el rol debe venir **exclusivamente** del backend. La barra del
 simulador debe eliminarse o quedar tras un flag de entorno estrictamente de
 desarrollo.
@@ -2553,113 +2578,108 @@ El producto declara **WCAG 2.2 AA** (`PublicHeader.tsx:189`, `PublicFooter.tsx:4
 
 ---
 
-## 12. Recomendaciones para migrar a Laravel + Blade + Inertia
+## 12. Recomendaciones para implementar la API REST en Laravel
 
-> Recomendaciones de arquitectura y proceso. **No incluye código.**
+> Recomendaciones de arquitectura y proceso para el **backend como API REST**.
+> El frontend es un proyecto React/Vite separado (repositorio `senavida-frontend`)
+> que consume esta API. **No incluye código de producción**, solo lineamientos.
 
-### 12.1 Ubicación de los archivos
+### 12.1 Estructura del proyecto backend
 
-El README ya plantea mover `src/` a `resources/js/`. Estructura sugerida:
+El backend es un proyecto Laravel independiente. No aloja el frontend: no hay
+`resources/js/` con las páginas React ni un layout Blade que las cargue. La
+estructura relevante es la del backend puro:
 
 ```
-resources/
-├── views/
-│   └── app.blade.php          # ÚNICA vista Blade: layout raíz con @inertia y @vite
-└── js/
-    ├── app.tsx                # reemplaza main.tsx: createInertiaApp + resolvePageComponent
-    ├── Pages/                 # ← nuevo: una página por ruta
-    │   ├── Landing.tsx
-    │   ├── Auth/Login.tsx
-    │   ├── Admision/Index.tsx
-    │   ├── Categorizacion/Index.tsx
-    │   ├── Medico/Index.tsx
-    │   ├── Admin/Pictogramas.tsx
-    │   ├── Admin/Auditoria.tsx
-    │   ├── Admin/Configuracion.tsx
-    │   ├── Admin/Usuarios.tsx      # ← pantalla nueva (R15)
-    │   └── Paciente/Portal.tsx
-    ├── Layouts/
-    │   ├── PublicLayout.tsx    # PublicHeader + PublicFooter
-    │   └── DashboardLayout.tsx # ← DashboardContainer sin el switch de rol
-    ├── Components/             # AppLogo, ChatPanel, PictogramGrid, VitalsForm, …
-    ├── types.ts                # se mantiene, ajustado según §5.3
-    └── lib/
-        └── pictograms.ts       # getPictogramEmoji extraído de PatientView (R36)
+app/
+├── Http/
+│   ├── Controllers/Api/V1/     # controladores de la API, agrupados por versión
+│   │   ├── AuthController.php
+│   │   ├── PatientController.php
+│   │   ├── MedicalSessionController.php
+│   │   └── ...
+│   ├── Requests/               # Form Requests: validación de cada endpoint
+│   ├── Resources/              # API Resources: forma exacta del JSON (camelCase)
+│   └── Middleware/             # multitenancy, sesión médica activa, etc.
+├── Models/                     # Eloquent: una clase por entidad (§5)
+├── Policies/                   # autorización por entidad
+└── Services/                   # lógica de negocio reutilizable
+routes/
+└── api.php                     # TODAS las rutas, bajo el prefijo /api/v1
+database/
+├── migrations/                 # esquema de tablas
+├── seeders/                    # datos desde mockData.ts
+└── factories/
 ```
 
-**Blade queda reducido a un solo archivo.** No conviene usar Blade para
-renderizar UI: el valor de Inertia es precisamente que las páginas son React.
+**No se usa Blade para UI.** En una API REST el backend devuelve **JSON**, no
+HTML. Blade solo podría aparecer para algo marginal (por ejemplo, la plantilla de
+un correo), nunca para las pantallas del sistema, que las construye el frontend.
 
-### 12.2 Rutas — el cambio estructural más importante
+### 12.2 Rutas — todo en `api.php` bajo `/api/v1`
 
-Hoy la navegación es `useState<'landing'|'login'|'dashboard'>` más un
-`userRole` que decide qué dashboard renderizar. Con Inertia, cada combinación
-pasa a ser **una URL real**:
+A diferencia del modelo Inertia (donde había rutas `web.php` que devolvían
+páginas), aquí **todas** las rutas viven en `routes/api.php`, se agrupan bajo el
+prefijo `/api/v1` y se protegen con el middleware `auth:sanctum`.
 
-| Estado actual | Ruta Inertia sugerida | Página |
+| Acción del frontend | Método y ruta REST | Controlador |
 |---|---|---|
-| `currentView='landing'` | `GET /` | `Landing` |
-| `currentView='login'` | `GET /login` | `Auth/Login` |
-| `role='admision'` | `GET /admision` | `Admision/Index` |
-| `role='categorizacion'` | `GET /categorizacion` | `Categorizacion/Index` |
-| `role='medico'` | `GET /medico` | `Medico/Index` |
-| `role='admin_institucional'` | `GET /admin/pictogramas` etc. | `Admin/*` |
-| `role='paciente'` | `GET /portal` | `Paciente/Portal` |
+| Iniciar sesión | `POST /api/v1/auth/login` | `AuthController@login` |
+| Usuario autenticado | `GET /api/v1/auth/me` | `AuthController@me` |
+| Cerrar sesión | `POST /api/v1/auth/logout` | `AuthController@logout` |
+| Canjear código CTA (paciente) | `POST /api/v1/auth/patient/redeem` | `AuthController@redeemCta` |
+| Ver un paciente | `GET /api/v1/patients/{id}` | `PatientController@show` |
+| Signos vitales | `POST /api/v1/medical-sessions/{id}/vital-signs` | `VitalSignController@store` |
 
-Consecuencias directas:
-- El **sidebar deja de mutar el rol** y pasa a ser un conjunto de `<Link>`
-  filtrado por permisos (resuelve R2).
-- La **barra flotante del simulador se elimina** o queda tras
-  `import.meta.env.DEV` + un flag explícito.
-- Las secciones de la landing (`#inicio`, `#que-es`, …) pueden seguir siendo
-  anclas dentro de una sola página — eso está bien y no necesita cambiar.
-- Recomendable **Ziggy** para no hardcodear URLs en el cliente.
+Consecuencias directas respecto del prototipo:
+- La navegación entre pantallas (landing, login, dashboards) es responsabilidad
+  **del frontend** (React Router o equivalente), **no** del backend. El backend
+  solo expone datos.
+- El selector de rol del prototipo desaparece: el rol lo determina el backend a
+  partir del token (resuelve R2).
+- No hay redirecciones del servidor ni *flash messages*; el frontend interpreta
+  los códigos HTTP y el envoltorio de respuesta (§7) para decidir qué mostrar.
 
-### 12.3 Web (Inertia) vs API (Sanctum)
+### 12.3 Autenticación — Sanctum con Bearer token (A-02, A-03)
 
 | Consumidor | Mecanismo | Motivo |
 |---|---|---|
-| Dashboards del personal | **Inertia sobre sesión web** | Formularios, redirecciones y flash messages nativos; sin token que gestionar |
-| Portal del paciente | `DECISIÓN PENDIENTE` (D1) | Si es un dispositivo del paciente, **Sanctum con token acotado a la sesión médica** es más adecuado |
-| Broadcasting | Reverb con auth de canal privado | Ambos consumidores |
-| Integraciones futuras (app móvil) | `api.php` + Sanctum | — |
+| Personal de salud | **Sanctum API token (Bearer)** obtenido con email + contraseña | Estándar de API REST; el token se envía en `Authorization` en cada petición |
+| Portal del paciente | **Sanctum token derivado del código CTA**, acotado a la sesión médica | Sin contraseñas; expira con la atención |
+| Broadcasting (tiempo real) | Reverb con auth de canal privado, autorizada con el mismo token | Ambos consumidores |
+| Integraciones futuras | Mismo esquema Sanctum | — |
 
-👉 Empezar **todo con Inertia** salvo el portal del paciente, y extraer a
-`api.php` solo lo que efectivamente necesite consumo externo. Duplicar
-controladores desde el día uno es coste sin beneficio.
+Puntos clave de implementación:
+- El modelo `User` usa el trait `HasApiTokens` de Sanctum.
+- El login crea el token con `createToken(...)` y lo devuelve **una sola vez**.
+- El logout ejecuta `currentAccessToken()->delete()` para revocarlo.
+- **No hay CSRF** (no se usan cookies de sesión). La protección es el propio
+  token + HTTPS.
+- El token del paciente se revoca cuando la sesión médica se cierra o expira.
 
-### 12.4 Props compartidas vs peticiones
+### 12.4 Estado del cliente vs peticiones
 
-El patrón natural de Inertia reemplaza el estado global de `App.tsx`:
+En Inertia el estado global viajaba como *props compartidas*. En API REST el
+frontend **mantiene su propio estado** (por ejemplo con Context o un store) y lo
+llena con llamadas a la API:
 
-**Props compartidas** (middleware `HandleInertiaRequests`) — lo que hoy vive en
-`App.tsx` y se necesita en todas las páginas:
-- `auth.user` (con `role`, `permissions`, `healthCenter`, `unit`)
-- `flash` (reemplaza los `alert()` de confirmación)
-- `activeSession` — la sesión médica en curso del centro/unidad del usuario
-  (alimenta el banner de `DashboardContainer.tsx:257-279`)
+- Al iniciar sesión, guarda el token y llama a `GET /api/v1/auth/me` para el
+  contexto (`user`, `role`, `permissions`, `healthCenter`, `unit`).
+- Cada pantalla pide sus propios datos a su endpoint (`vital-signs`, `triage`,
+  `consents`, `messages`, `clinical-notes`, `timeline`).
+- Para datos pesados (historial de chat, auditoría) se usa **paginación** del
+  lado servidor (§14 del contrato), no traer todo de una vez.
 
-**Props de página** — datos específicos de cada vista (`vitals`, `triage`,
-`consents`, `chatHistory`, `clinicalNotes`, `timeline`).
+### 12.5 Validación — Form Requests
 
-**Deferred props / partial reloads** para lo pesado: el historial de chat y los
-logs de auditoría no deben viajar en cada navegación.
+Cada endpoint que recibe datos usa un **Form Request** de Laravel:
 
-### 12.5 Formularios y validación
-
-Los 8 formularios identificados (login, CTA, signos vitales, triage, nota
-clínica, cierre, config TI, contacto) deben usar `useForm` de Inertia:
-
-- Los errores de `FormRequest` de Laravel llegan a `errors` automáticamente.
-- Las 3 validaciones con `alert()` de signos vitales (§8.3) se convierten en
-  errores inline con `aria-describedby` (resuelve R41).
-- Los `alert()` de confirmación se convierten en **flash messages** con
-  `aria-live="polite"`.
-- `processing` de `useForm` da los estados de carga que hoy no existen (R21).
-
-**Regla:** las validaciones del cliente pueden quedarse como feedback inmediato,
-pero **cada una debe existir también en el servidor**. Hoy no existe ninguna en
-servidor.
+- Las reglas viven en el servidor y son la fuente de verdad (§8). El frontend
+  puede validar también, pero **el servidor siempre revalida**.
+- Un fallo de validación devuelve **422** con el objeto `errors` del envoltorio
+  estándar (§7 del contrato), que el frontend muestra junto a cada campo.
+- Las validaciones que en el prototipo eran `alert()` (signos vitales, §8.3) se
+  convierten en reglas de Form Request.
 
 ### 12.6 Autorización
 
@@ -2668,15 +2688,26 @@ servidor.
   El borrador de `backendDoc.ts:397-422` es un buen punto de partida.
 - **Middleware de multitenancy** que fuerce `health_center_id` en cada consulta
   (un global scope sobre los modelos con esa columna evita olvidos).
-- **Middleware de sesión activa** (§8.7) aplicado al grupo de rutas de escritura
-  clínica.
-- **Permisos con nombre** (§9.4) expuestos en `auth.permissions` para el gating
-  de UI. La UI oculta; el servidor decide.
+- **Middleware de sesión médica activa** (§8.7) aplicado al grupo de rutas de
+  escritura clínica.
+- **Permisos con nombre** (§9.4) devueltos en `GET /auth/me` para el gating de
+  UI. La UI oculta; el servidor decide.
 - **API Resources distintas por rol** para materializar la segregación de datos
   de §9.2: el recurso que ve admisión no debe incluir triage ni notas, aunque el
   modelo los tenga cargados.
 
-### 12.7 Tiempo real
+### 12.7 Documentación de la API — Swagger / OpenAPI (A-07)
+
+El backend publica su documentación OpenAPI con **Swagger UI**:
+- Herramienta sugerida: `darkaonline/l5-swagger`, que genera la especificación a
+  partir de anotaciones en los controladores.
+- Debe declararse el esquema de seguridad `bearerAuth` para probar endpoints
+  protegidos desde la propia interfaz.
+- Prioridad de cobertura: primero los endpoints que evalúa la rúbrica
+  (autenticación, registro de usuario con cifrado, recursos con modelos), luego
+  el resto.
+
+### 12.8 Tiempo real
 
 Sin broadcasting el producto no funciona (§6.10). Recomendación:
 **Laravel Reverb** (first-party, WebSocket, sin dependencia SaaS — relevante en
@@ -2685,43 +2716,29 @@ entornos hospitalarios con restricciones de red).
 Canales privados por sesión médica, autorizados con la misma policy que la
 lectura de la sesión. Los eventos clave son los de §6.10.
 
-Alternativa de bajo costo para una primera versión: **polling con partial
-reloads de Inertia** (`router.reload({only: ['chatHistory']})`) cada pocos
-segundos. Funciona, pero degrada la experiencia del banner de convocatoria, que
-debe ser inmediato.
+Alternativa de bajo costo para una primera versión: **polling** desde el frontend
+(pedir cada pocos segundos los mensajes nuevos). Funciona, pero degrada la
+inmediatez del banner de convocatoria.
 
-### 12.8 Orden de conexión recomendado (frontend)
+### 12.9 CORS — imprescindible con proyectos separados
 
-Al conectar, **el orden importa** para no romper el prototipo de golpe:
+Como el frontend (otro origen: por ejemplo `http://localhost:3000`) y el backend
+(`http://localhost:8000`) están en **orígenes distintos**, el backend **DEBE**
+configurar **CORS** para permitir las peticiones del frontend:
+- Ajustar `config/cors.php` con los orígenes permitidos del frontend.
+- Permitir la cabecera `Authorization` y los métodos usados.
+- Sin esto, el navegador bloquea las llamadas del frontend al backend.
 
-1. Extraer `getPictogramEmoji` a `lib/` (R36) y eliminar `backendDoc.ts` (§11.4).
-2. Convertir `DashboardContainer` en `DashboardLayout` sin `onRoleChange`.
-3. Crear las páginas de §12.2 con las props que hoy son mocks — **sin conectar
-   nada aún**. La app debe seguir funcionando.
-4. Sustituir `mockPatient` por `props.patient` en los 4 componentes (R8).
-5. Conectar los módulos en el orden de §10.4.
-6. Eliminar `src/data/mockData.ts` y convertirlo en seeders.
-7. Activar `strict: true` en `tsconfig.json` y arreglar lo que salte (R29).
-8. Agregar ESLint + Prettier + CI (R31, R32).
+### 12.10 Higiene y versiones
 
-### 12.9 Higiene previa
-
-Antes de empezar la migración, limpiezas de bajo riesgo y alto retorno:
-
-- Eliminar `motion` de `package.json` (R33).
-- Eliminar exports e imports muertos (R34, R35).
-- Reescribir `.env.example` con las variables reales (R37).
-- Limpiar los comentarios de AI Studio de `vite.config.ts` (R38).
-- Auto-hospedar las fuentes de Google (§10.5).
-- Corregir los bugs de bajo costo y alto impacto: R7 (consent "Rechazado"),
-  R25 (etiquetas de nota), R26 (unidad Maternidad), R27 (nombre del centro).
-
-### 12.10 Versiones
-
-Las decisiones del README están correctamente fundamentadas y **deben
-mantenerse**: PHP 8.2+, Laravel 11+, **Vite 7** (no 8, por el bug abierto de
-`laravel-vite-plugin`), React 19 (requisito duro de Inertia v3), Tailwind 4
-(default en Laravel 11/12).
+- Mantener las versiones acordadas: **PHP 8.2+ (se usa 8.4)**, **Laravel 12**,
+  **PostgreSQL**. El frontend usa React 19 + Vite 7 + Tailwind 4 en su propio
+  repositorio.
+- Del lado frontend (responsabilidad de la otra persona): reemplazar
+  `src/data/mockData.ts` por llamadas reales a la API, escribir `.env.example`
+  con `VITE_API_URL`, y activar `strict: true` en `tsconfig.json`.
+- Del lado backend: convertir `mockData.ts` en **seeders**, activar Pint y Pest,
+  y CI.
 
 ---
 
@@ -2732,15 +2749,19 @@ en paralelo con el frontend.
 
 ### Fase 0 · Fundaciones (1–2 sem)
 
-- Proyecto Laravel + Inertia + React 19 + Vite 7 + Tailwind 4.
-- Migrar `src/` a `resources/js/` con el layout Blade raíz.
-- **Resolver D1 (auth del paciente) y D2 (casing)** — bloquean todo lo demás.
+- Proyecto Laravel 12 (API REST) + PostgreSQL + Sanctum. El frontend React 19 + Vite 7 + Tailwind 4 vive en su propio repositorio.
+- Configurar CORS para el origen del frontend; instalar Sanctum y `l5-swagger`.
+- **Resolver la máquina de estados de la sesión** (status vs stage) — bloquea el
+  modelo de `MedicalSession`. (La auth del paciente y el casing ya están resueltos:
+  Sanctum + `camelCase`.)
 - Base de datos, convención de UUIDs, `AuditLog` como observer transversal.
+- Instalar **Sanctum** y configurar **CORS** para el origen del frontend.
 - Seeders desde `mockData.ts` (23 pictogramas, 5 categorías, 8 mensajes rápidos,
   5 niveles de triage, el caso de demostración de Ana María Torres).
-- CI: `tsc --noEmit`, ESLint, Pint, Pest.
+- CI: Pint, Pest. Documentación base con **Swagger (l5-swagger)**.
 
-**Entregable:** la app se sirve desde Laravel con datos de seeder. Sin auth real.
+**Entregable:** la API arranca contra PostgreSQL con datos de seeder y Swagger
+publicado. Sin auth real todavía.
 
 ### Fase 1 · Identidad y multitenancy (1–2 sem) — M1, M2
 
