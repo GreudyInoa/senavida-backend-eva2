@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -16,23 +17,42 @@ class AuthController extends Controller
      */
     public function login(Request $request): JsonResponse
     {
-        // 1. Validar que lleguen email y password con el formato correcto
+        // 1. Validar formato de los campos
         $credentials = $request->validate([
-            'email'    => ['required', 'email'],
-            'password' => ['required', 'string'],
+            'email'          => ['required', 'email'],
+            'password'       => ['required', 'string'],
+            'healthCenterId' => ['sometimes', 'uuid'],
+            'unitId'         => ['sometimes', 'uuid'],
         ]);
 
-        // 2. Buscar al usuario por su email
+        // 2. Límite de intentos (rate limiting)
+        $throttleKey = 'login:'.strtolower($credentials['email']).'|'.$request->ip();
+
+        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+
+            return response()->json([
+                'success' => false,
+                'error'   => ['message' => "Demasiados intentos. Intenta de nuevo en {$seconds} segundos."],
+            ], 429);
+        }
+
+        // 3. Buscar al usuario por su email
         $user = User::where('email', $credentials['email'])->first();
 
-        // 3. Verificar credenciales: que el usuario exista y la contraseña coincida
+        // 4. Verificar credenciales: que el usuario exista y la contraseña coincida
         if (! $user || ! Hash::check($credentials['password'], $user->password)) {
+            RateLimiter::hit($throttleKey, 60);
+
             throw ValidationException::withMessages([
                 'email' => ['Las credenciales no son correctas.'],
             ]);
         }
 
-        // 4. Verificar que el usuario esté activo
+        // Credenciales correctas: limpiamos el contador de intentos
+        RateLimiter::clear($throttleKey);
+
+        // 5. Verificar que el usuario esté activo
         if (! $user->is_active) {
             return response()->json([
                 'success' => false,
@@ -40,10 +60,25 @@ class AuthController extends Controller
             ], 403);
         }
 
-        // 5. Crear el token de Sanctum
+        // 6. Verificar pertenencia al centro y unidad (si se enviaron)
+        if (isset($credentials['healthCenterId']) && $user->health_center_id !== $credentials['healthCenterId']) {
+            return response()->json([
+                'success' => false,
+                'error'   => ['message' => 'No perteneces a ese centro de salud.'],
+            ], 403);
+        }
+
+        if (isset($credentials['unitId']) && $user->unit_id !== $credentials['unitId']) {
+            return response()->json([
+                'success' => false,
+                'error'   => ['message' => 'No perteneces a esa unidad.'],
+            ], 403);
+        }
+
+        // 7. Crear el token de Sanctum
         $token = $user->createToken('auth-token')->plainTextToken;
 
-        // 6. Devolver el token y los datos del usuario
+        // 8. Devolver el token y los datos del usuario
         return response()->json([
             'success' => true,
             'data'    => [
