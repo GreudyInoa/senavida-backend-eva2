@@ -59,4 +59,37 @@ class AuthController extends Controller
             ],
         ], 200);
     }
+
+    /**
+     * Devuelve los datos del usuario autenticado (según su token).
+     */
+    public function me(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'user' => [
+                    'id'       => $user->id,
+                    'name'     => $user->name,
+                    'email'    => $user->email,
+                    'role'     => $user->role,
+                    'isActive' => $user->is_active,
+                ],
+            ],
+        ], 200);
+    }
+
+    /**
+     * Cierra sesión: revoca el token actual en el servidor.
+     */
+    public function logout(Request $request): JsonResponse
+    {
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->json([
+            'success' => true,
+        ], 200);
+    }
 }
