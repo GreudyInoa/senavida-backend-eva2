@@ -11,12 +11,15 @@ class UserController extends Controller
 {
     /**
      * Registra un nuevo usuario (funcionario del sistema).
-     * Solo un admin_institucional puede hacerlo.
+     * Solo un admin_institucional puede hacerlo, y únicamente
+     * para su propio centro de salud.
      */
     public function register(Request $request): JsonResponse
     {
+        $admin = $request->user();
+
         // 1. Verificar que quien hace la petición sea admin_institucional
-        if ($request->user()->role !== 'admin_institucional') {
+        if ($admin->role !== 'admin_institucional') {
             return response()->json([
                 'success' => false,
                 'error'   => ['message' => 'No tienes permiso para registrar usuarios.'],
@@ -27,14 +30,22 @@ class UserController extends Controller
         $data = $request->validate([
             'name'             => ['required', 'string', 'max:255'],
             'email'            => ['required', 'email', 'unique:users,email'],
-            'password'         => ['required', 'string', 'min:8'],
+            'password'         => ['required', 'string', 'min:8', 'confirmed'],
             'role'             => ['required', 'in:admin_institucional,admision,categorizacion,medico'],
             'organizationId'   => ['required', 'uuid', 'exists:organizations,id'],
             'healthCenterId'   => ['required', 'uuid', 'exists:health_centers,id'],
             'unitId'           => ['required', 'uuid', 'exists:units,id'],
         ]);
 
-        // 3. Crear el usuario (la contraseña se cifra automáticamente)
+        // 3. Verificar que el admin solo registre usuarios en SU propio centro
+        if ($data['healthCenterId'] !== $admin->health_center_id) {
+            return response()->json([
+                'success' => false,
+                'error'   => ['message' => 'Solo puedes registrar usuarios en tu propio centro de salud.'],
+            ], 403);
+        }
+
+        // 4. Crear el usuario (la contraseña se cifra automáticamente)
         $user = User::create([
             'name'              => $data['name'],
             'email'             => $data['email'],
@@ -46,7 +57,7 @@ class UserController extends Controller
             'is_active'         => true,
         ]);
 
-        // 4. Responder con los datos del usuario creado (sin la contraseña)
+        // 5. Responder con los datos del usuario creado (sin la contraseña)
         return response()->json([
             'success' => true,
             'data'    => [

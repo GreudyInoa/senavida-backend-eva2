@@ -1,4 +1,4 @@
-<?php
+[<?php
 
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -50,7 +50,10 @@ return [
     |
     */
 
-    'expiration' => null,
+     // En sistema de  salud se recomienda de 1 a 8 horas Datos sensibles (pacientes), porque  el personal necesita trabajar sin interrupciones constantes
+
+    'expiration' => 120,  
+
 
     /*
     |--------------------------------------------------------------------------
