@@ -17,7 +17,12 @@ Route::prefix('v1')->group(function () {
         Route::post('/users', [UserController::class, 'register']);
 
         Route::get('/organizations', [OrganizationController::class, 'index']);
+        Route::post('/organizations', [OrganizationController::class, 'store']);
+
         Route::get('/health-centers', [HealthCenterController::class, 'index']);
+        Route::post('/health-centers', [HealthCenterController::class, 'store']);
+
         Route::get('/units', [UnitController::class, 'index']);
+        Route::post('/units', [UnitController::class, 'store']);
     });
 });

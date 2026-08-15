@@ -18,8 +18,8 @@ class UserController extends Controller
     {
         $admin = $request->user();
 
-        // 1. Verificar que quien hace la petición sea admin_institucional
-        if ($admin->role !== 'admin_institucional') {
+        // 1. Verificar que quien hace la petición sea admin_institucional o super_admin
+        if (! in_array($admin->role, ['super_admin', 'admin_institucional'])) {
             return response()->json([
                 'success' => false,
                 'error'   => ['message' => 'No tienes permiso para registrar usuarios.'],
@@ -31,18 +31,18 @@ class UserController extends Controller
             'name'             => ['required', 'string', 'max:255'],
             'email'            => ['required', 'email', 'unique:users,email'],
             'password'         => ['required', 'string', 'min:8', 'confirmed'],
-            'role'             => ['required', 'in:admin_institucional,admision,categorizacion,medico'],
+            'role'             => ['required', 'in:super_admin,admin_institucional,admision,categorizacion,medico'],
             'organizationId'   => ['required', 'uuid', 'exists:organizations,id'],
             'healthCenterId'   => ['required', 'uuid', 'exists:health_centers,id'],
             'unitId'           => ['required', 'uuid', 'exists:units,id'],
         ]);
 
-        // 3. Verificar que el admin solo registre usuarios en SU propio centro
-        if ($data['healthCenterId'] !== $admin->health_center_id) {
+        // 3. Verificar que el admin solo registre usuarios en SU propio centro y que tambien lo pueda hacer el super_admin
+        if ($admin->role === 'admin_institucional' && $data['healthCenterId'] !== $admin->health_center_id) {
             return response()->json([
                 'success' => false,
                 'error'   => ['message' => 'Solo puedes registrar usuarios en tu propio centro de salud.'],
-            ], 403);
+             ], 403);
         }
 
         // 4. Crear el usuario (la contraseña se cifra automáticamente)

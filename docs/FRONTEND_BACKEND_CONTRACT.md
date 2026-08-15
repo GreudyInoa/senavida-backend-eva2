@@ -2,10 +2,16 @@
 
 **Proyecto:** SEÑAVIDA — Plataforma de comunicación inclusiva en salud
 **Documento:** Contrato oficial Frontend ↔ Backend
-**Versión del contrato:** `2.0.0` — arquitectura **API REST**
+**Versión del contrato:** `2.1.0` — arquitectura **API REST**
 **Estado:** Vigente. Decisiones de arquitectura ratificadas por el equipo y el docente (ver §Decisiones de arquitectura).
 **Fuente:** `BACKEND_IMPLEMENTATION_GUIDE.md` — auditoría del frontend en el commit `41360a8`
-**Fecha:** 2026-08-05
+**Fecha:** 2026-08-05 (actualizado v2.1.0)
+
+> **Cambios en v2.1.0** (adiciones compatibles, no rompen v2.0.0):
+> - Nuevo rol `super_admin` (libre, gestiona la estructura del sistema). Ver §6.3 (enum role).
+> - Endpoints de catálogos implementados con `GET` y `POST`: `/organizations`, `/health-centers`, `/units`. Ver §7.3.
+> - `POST /users` implementado, con confirmación de contraseña y restricción por centro para `admin_institucional`. Ver §7.9.
+> - Modelo de dos niveles de administrador documentado (super_admin vs admin_institucional).
 
 ---
 
@@ -286,7 +292,7 @@ hace una sola vez en la capa de serialización. Se elige el costo menor.
 ser identificadores, no nombres de campo):
 
 ```
-role:         admin_institucional | admision | categorizacion | medico | paciente
+role:         super_admin | admin_institucional | admision | categorizacion | medico | paciente
 sessionStatus: pending_consent | active | in_admission | in_triage |
                in_medical_care | waiting_interpreter | closed | cancelled | expired
 consentType:  start_care | basic_data | clinical_data | location | contacts |
@@ -1185,7 +1191,8 @@ ContactMessage      (público, fuera del dominio clínico)
 |---|---|
 | **Descripción** | Perfil funcional que determina capacidades y visibilidad de datos |
 | **Responsable** | Backend. **Inmutable desde la aplicación** |
-| **Valores** | `admin_institucional`, `admision`, `categorizacion`, `medico`, `paciente` |
+| **Valores** | `super_admin`, `admin_institucional`, `admision`, `categorizacion`, `medico`, `paciente` |
+| **Nota `super_admin`** | Rol libre (sin centro/unidad). Gestiona la estructura del sistema: crea organizaciones, centros, unidades y usuarios en cualquier centro. El `admin_institucional` queda limitado a crear unidades y usuarios dentro de su propio centro. |
 | **Relaciones** | Vinculado a User |
 
 > **Regla vinculante.** El rol **NO DEBE** ser elegible, enviable ni modificable
@@ -1572,18 +1579,27 @@ roles lo pueden invocar.
 
 ### 7.3 Catálogos
 
-Todos de solo lectura. Cacheables por el cliente.
-
 | Endpoint | Método | Descripción | Auth | Roles |
 |---|---|---|:---:|---|
-| `/health-centers` | `GET` | Establecimientos activos | ❌ | — |
-| `/health-centers/{id}/units` | `GET` | Unidades de un establecimiento | ❌ | — |
-| `/units/{id}/locations` | `GET` | Ubicaciones de convocatoria | ✅ | ADI, CAT, MED |
+| `/organizations` | `GET` | Organizaciones activas (id, name) | ✅ | Cualquier usuario autenticado |
+| `/organizations` | `POST` | Crea una organización | ✅ | `super_admin` |
+| `/health-centers` | `GET` | Centros activos (id, name, organizationId). Alimenta selectores | ✅ | Cualquier usuario autenticado |
+| `/health-centers` | `POST` | Crea un centro de salud | ✅ | `super_admin` |
+| `/units` | `GET` | Unidades activas (id, name, healthCenterId). Filtro opcional `?healthCenterId=` | ✅ | Cualquier usuario autenticado |
+| `/units` | `POST` | Crea una unidad | ✅ | `super_admin` (cualquier centro) o `admin_institucional` (solo su centro) |
 | `/triage-levels` | `GET` | Niveles de categorización C1–C5 | ✅ | CAT, MED |
 
-> Los dos primeros son públicos porque alimentan los selectores de la pantalla de
-> acceso, previa a la autenticación. **NO DEBEN** exponer más que identificador y
-> nombre.
+> **Estado de implementación (v2.1):** los endpoints `GET/POST` de
+> `/organizations`, `/health-centers` y `/units` ya están implementados y
+> probados. Los `GET` exponen únicamente identificador y nombre (más la
+> referencia al padre). Los `POST` de organización y centro son exclusivos de
+> `super_admin`; el `POST` de unidad sigue el patrón de doble camino según el
+> rol.
+>
+> **Nota sobre autenticación:** en esta versión los `GET` de catálogos requieren
+> token (a diferencia de una versión previa del contrato que los planteaba
+> públicos), porque el flujo actual crea usuarios vía panel de administración ya
+> autenticado, no un auto-registro público.
 
 ### 7.4 Código temporal de atención
 
@@ -1704,10 +1720,18 @@ Todos de solo lectura. Cacheables por el cliente.
 | `/security-settings` | `GET` | Parámetros de seguridad | ✅ | ADM |
 | `/security-settings` | `PUT` | Actualiza parámetros | ✅ | ADM |
 | `/users` | `GET` | Lista de funcionarios | ✅ | ADM |
-| `/users` | `POST` | Crea un funcionario | ✅ | ADM |
+| `/users` | `POST` | Crea un funcionario | ✅ | `super_admin` (cualquier centro) o `admin_institucional` (solo su centro) |
 | `/users/{id}` | `PATCH` | Actualiza o desactiva | ✅ | ADM |
 | `/admin/stats` | `GET` | Métricas del panel | ✅ | ADM |
 
+> **Estado de implementación (v2.1):** `POST /users` ya está implementado y
+> probado. Exige `name`, `email`, `password` + `password_confirmation` (regla
+> `confirmed`), `role`, `organizationId`, `healthCenterId`, `unitId`. La
+> contraseña se cifra automáticamente (bcrypt). Un `admin_institucional` solo
+> puede crear usuarios en su propio centro; un `super_admin` en cualquiera. La
+> respuesta nunca incluye la contraseña. Los demás recursos de esta tabla
+> (`GET /users`, `PATCH`, pictogramas, auditoría, etc.) siguen pendientes.
+>
 > Los recursos de usuarios **no tienen interfaz** en el frontend auditado, pero
 > son requisito declarado del producto (E05). El equipo de frontend **DEBE**
 > construir esa pantalla; el de backend, estos recursos.

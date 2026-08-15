@@ -653,6 +653,14 @@ tipo anónimo inline con los mismos campos menos `isActive`.
 | `medico` | "Médico Urgenciólogo" | `DashboardContainer.tsx:94` |
 | `paciente` | "Portal del Paciente" | `Login.tsx:62` |
 
+> **Actualización v2.1 — sexto rol `super_admin`.** El backend introdujo un rol
+> adicional, `super_admin`, no presente en el prototipo original. Es un rol
+> libre (sin centro/unidad asociados) que gestiona la estructura del sistema:
+> crea organizaciones, centros, unidades y usuarios en cualquier centro. El
+> `admin_institucional` queda limitado a crear unidades y usuarios dentro de su
+> propio centro. El primer `super_admin` se crea manualmente (seeder/Tinker);
+> no es un rol asignable desde el auto-registro (que de todas formas no existe).
+
 `DECISIÓN PENDIENTE`: ¿los roles son un **enum** en la tabla `users` (1 rol por
 usuario, como sugiere la unión de tipos) o una **relación N:M** (como sugiere
 `hasAnyRole([...])` en la policy de `backendDoc.ts:411`)? El frontend asume
@@ -1266,12 +1274,23 @@ Formulario público de la landing (`LandingPage.tsx:1022-1076`):
 
 ### 6.2 M2 · Catálogos institucionales
 
-| # | Método | Ruta | Origen | Devuelve |
-|---|---|---|---|---|
-| C1 | `GET` | `/health-centers` | `Login.tsx:46-49` | `[{id, name, code}]` activos |
-| C2 | `GET` | `/health-centers/{id}/units` | `Login.tsx:51-55` | `[{id, name}]` activas |
-| C3 | `GET` | `/units/{id}/locations` | E21 — hoy hardcodeado en 3 componentes | `[{id, label}]` para convocatoria |
-| C4 | `GET` | `/triage-levels` | `DashboardCategorizacion.tsx:54-60` | `[{code, name, color_hex, description}]` |
+| # | Método | Ruta | Origen | Devuelve | Estado |
+|---|---|---|---|---|---|
+| C0a | `GET` | `/organizations` | Selector de organización | `[{id, name}]` activas | ✅ Implementado |
+| C0b | `POST` | `/organizations` | Panel super_admin | `{id, name}` — solo `super_admin` | ✅ Implementado |
+| C1 | `GET` | `/health-centers` | `Login.tsx:46-49` | `[{id, name, organizationId}]` activos | ✅ Implementado |
+| C1b | `POST` | `/health-centers` | Panel super_admin | `{id, name, organizationId}` — solo `super_admin` | ✅ Implementado |
+| C2 | `GET` | `/units` (filtro `?healthCenterId=`) | `Login.tsx:51-55` | `[{id, name, healthCenterId}]` activas | ✅ Implementado |
+| C2b | `POST` | `/units` | Panel admin | `{id, name, healthCenterId}` — `super_admin` (cualquier centro) o `admin_institucional` (solo el suyo) | ✅ Implementado |
+| C3 | `GET` | `/units/{id}/locations` | E21 — hoy hardcodeado en 3 componentes | `[{id, label}]` para convocatoria | ⏳ Pendiente |
+| C4 | `GET` | `/triage-levels` | `DashboardCategorizacion.tsx:54-60` | `[{code, name, color_hex, description}]` | ⏳ Pendiente |
+
+> **Nota v2.1:** el listado de unidades se resolvió con un único endpoint
+> `GET /units` con filtro opcional por query parameter (`?healthCenterId=`), en
+> vez de la ruta anidada `/health-centers/{id}/units` planteada originalmente.
+> Ambos enfoques son válidos; se eligió el filtro por ser más flexible. Los
+> endpoints de creación (`POST`) implementan el modelo de dos niveles de
+> administrador (ver §6.1 M1 y el documento de estudio DOS_NIVELES_ADMIN).
 
 ### 6.3 M3 · Código Temporal de Atención
 
