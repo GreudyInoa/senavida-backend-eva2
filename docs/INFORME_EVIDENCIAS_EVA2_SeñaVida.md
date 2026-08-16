@@ -96,6 +96,10 @@ Todas las migraciones del proyecto figuran en estado **`Ran`**, incluyendo `crea
 
 > 💡 **¿Qué se está probando aquí?** La autenticación es el "portero" del sistema: decide quién entra y quién no. Un buen sistema de login no solo debe **aceptar** las credenciales correctas — también debe **rechazar** las incorrectas, **protegerse** contra quien intente adivinar contraseñas a la fuerza, y **saber revocar el acceso** cuando alguien cierra sesión. Esta sección prueba las cinco caras de esa moneda.
 
+El siguiente diagrama resume el flujo completo, de principio a fin, antes de entrar al detalle de cada endpoint:
+
+![Flujo de autenticación en SeñaVida](capturas/00_flujo_autenticacion.png)
+
 ### 3.1 Login exitoso
 
 > **Endpoint:** `POST /api/v1/auth/login`
