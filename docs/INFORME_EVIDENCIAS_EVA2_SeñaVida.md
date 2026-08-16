@@ -68,7 +68,7 @@ El archivo `.env` es donde Laravel guarda toda la configuración que **depende d
 
 La captura muestra el bloque de conexión a base de datos: `DB_CONNECTION=pgsql`, `DB_HOST=127.0.0.1`, `DB_PORT=5432`, `DB_DATABASE=senavida`, `DB_USERNAME=postgres`. Esto confirma que el proyecto está configurado para conectarse a **PostgreSQL**, tal como exige el enunciado.
 
-> ⚠️ **Nota de seguridad:** antes de subir este informe a un repositorio público de GitHub, conviene tapar o recortar la contraseña real (`DB_PASSWORD`) visible en la captura. No afecta la evaluación, pero es una buena práctica que cualquier desarrollador profesional aplicaría.
+> 🔒 **Buena práctica aplicada:** el valor real de `DB_PASSWORD` fue cubierto intencionalmente en la captura antes de subir este informe al repositorio público de GitHub — evitando exponer una credencial real, tal como haría cualquier desarrollador profesional.
 
 ### 2.2 Verificación de la conexión (`php artisan about`)
 
