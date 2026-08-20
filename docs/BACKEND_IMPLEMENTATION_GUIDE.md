@@ -2726,6 +2726,50 @@ El backend publica su documentación OpenAPI con **Swagger UI**:
   (autenticación, registro de usuario con cifrado, recursos con modelos), luego
   el resto.
 
+> **✅ IMPLEMENTADO (2026-08-20).** Esta sección deja de ser una recomendación:
+> Swagger está instalado, configurado y verificado. Detalles de la
+> implementación real:
+>
+> **Instalación**
+> ```bash
+> composer require darkaonline/l5-swagger
+> php artisan vendor:publish --provider "L5Swagger\L5SwaggerServiceProvider"
+> php artisan l5-swagger:generate   # regenerar tras cada cambio
+> ```
+>
+> **⚠️ Sintaxis obligatoria: atributos de PHP 8, no anotaciones.**
+> `zircote/swagger-php` 6.x **abandonó** el estilo de comentarios
+> `/** @OA\... */`. Usarlo produce el error engañoso
+> `Required @OA\Info() not found` aunque la anotación esté presente y el archivo
+> no tenga errores de sintaxis.
+>
+> | Estilo derogado | Estilo vigente |
+> |---|---|
+> | `use OpenApi\Annotations as OA;` | `use OpenApi\Attributes as OA;` |
+> | Dentro de `/** ... */` | `#[OA\...]`, fuera de comentarios |
+> | `@OA\Info(title="...")` | `#[OA\Info(title: '...')]` |
+> | Separador `=` | Separador `:` |
+>
+> **Regla de ubicación.** Un atributo debe quedar **pegado** al método que
+> describe. Un comentario intercalado entre el atributo y la firma del método
+> rompe la asociación. Orden correcto: `comentario → atributo → método`.
+>
+> **Ubicación de la metadata global.** `#[OA\Info]`, `#[OA\Server]` y
+> `#[OA\SecurityScheme]` viven en `app/Http/Controllers/Controller.php`, la clase
+> base de la que heredan todos los controladores — un único punto de verdad.
+>
+> **Rutas publicadas**
+>
+> | Recurso | URL |
+> |---|---|
+> | Swagger UI | `http://127.0.0.1:8000/api/documentation` |
+> | Especificación JSON | `http://127.0.0.1:8000/docs?api-docs.json` |
+>
+> **Cobertura actual: 10/10 endpoints**, agrupados en tres tags
+> (`Autenticacion`, `Catalogos`, `Usuarios`). Todos declaran `security` salvo
+> `POST /auth/login`, que es la puerta de entrada. Los 10 fueron probados en
+> vivo desde Swagger UI con resultados conformes a lo documentado.
+
 ### 12.8 Tiempo real
 
 Sin broadcasting el producto no funciona (§6.10). Recomendación:
@@ -2781,6 +2825,25 @@ en paralelo con el frontend.
 
 **Entregable:** la API arranca contra PostgreSQL con datos de seeder y Swagger
 publicado. Sin auth real todavía.
+
+> **📌 Estado real de ejecución (2026-08-20).** Swagger **no** se instaló en esta
+> Fase 0 como estaba planeado, sino más adelante, en el **Hito 0 de la Fase 4 de
+> ejecución**, una vez que ya existían los endpoints de autenticación, catálogos
+> y usuarios. Al momento de esta nota está **operativo y verificado**:
+>
+> | Aspecto | Estado |
+> |---|---|
+> | Paquete | `darkaonline/l5-swagger` 11.1.0 + `zircote/swagger-php` 6.6.0 |
+> | Sintaxis | **Atributos nativos de PHP 8** (`#[OA\...]`), no anotaciones PHPDoc |
+> | Swagger UI | `GET /api/documentation` ✅ |
+> | Especificación | `GET /docs?api-docs.json` ✅ |
+> | Esquema `bearerAuth` | Declarado y funcional (botón *Authorize*) ✅ |
+> | Cobertura | 10/10 endpoints existentes documentados y probados en vivo ✅ |
+>
+> **Advertencia para quien retome el proyecto:** `zircote/swagger-php` 6.x
+> **abandonó** las anotaciones en comentarios (`/** @OA\... */`). Usar ese estilo
+> falla en silencio con el error engañoso `Required @OA\Info() not found`. La
+> sintaxis correcta es `#[OA\Info(...)]` con `use OpenApi\Attributes as OA;`.
 
 ### Fase 1 · Identidad y multitenancy (1–2 sem) — M1, M2
 

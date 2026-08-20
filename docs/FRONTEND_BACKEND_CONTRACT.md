@@ -2,10 +2,23 @@
 
 **Proyecto:** SEÑAVIDA — Plataforma de comunicación inclusiva en salud
 **Documento:** Contrato oficial Frontend ↔ Backend
-**Versión del contrato:** `2.1.0` — arquitectura **API REST**
+**Versión del contrato:** `2.2.0` — arquitectura **API REST**
 **Estado:** Vigente. Decisiones de arquitectura ratificadas por el equipo y el docente (ver §Decisiones de arquitectura).
 **Fuente:** `BACKEND_IMPLEMENTATION_GUIDE.md` — auditoría del frontend en el commit `41360a8`
-**Fecha:** 2026-08-05 (actualizado v2.1.0)
+**Fecha:** 2026-08-20 (actualizado v2.2.0)
+
+> **Cambios en v2.2.0** (adiciones y correcciones, no rompen v2.1.0):
+> - **Swagger / OpenAPI (A-07) implementado y verificado.** 10/10 endpoints
+>   documentados, Swagger UI operativo en `/api/documentation`. Ver §19bis.
+> - **Corrección de sintaxis en §19bis:** el ejemplo de anotación PHPDoc quedó
+>   **derogado**. `swagger-php` 6.x exige **atributos nativos de PHP 8**
+>   (`#[OA\...]`); el estilo antiguo falla con `Required @OA\Info() not found`.
+> - **Ruta real de la especificación:** `/docs?api-docs.json` (no
+>   `/api/v1/openapi.json` como se sugería).
+> - **Defecto corregido:** un carácter `[` espurio al inicio de
+>   `config/sanctum.php` contaminaba **todas** las respuestas JSON de endpoints
+>   protegidos, violando el envoltorio estándar de §4. Resuelto; el frontend debe
+>   retirar cualquier parche que recorte el primer carácter de la respuesta.
 
 > **Cambios en v2.1.0** (adiciones compatibles, no rompen v2.0.0):
 > - Nuevo rol `super_admin` (libre, gestiona la estructura del sistema). Ver §6.3 (enum role).
@@ -3393,25 +3406,61 @@ de cada endpoint, y la evaluación puede verificarla.
 | Autenticación en la doc | Debe declararse el esquema `bearerAuth` para poder probar endpoints protegidos desde Swagger UI |
 | Mantenimiento | La documentación **DEBE** regenerarse cuando cambie un endpoint; una respuesta real que no coincida con la doc es un defecto |
 
+> **✅ Estado de implementación (2026-08-20).** Swagger está **operativo y
+> verificado**. Ajustes respecto a lo que esta tabla proponía:
+>
+> | Aspecto | Valor real |
+> |---|---|
+> | Swagger UI | `GET /api/documentation` — coincide con lo sugerido ✅ |
+> | Especificación | `GET /docs?api-docs.json` — **difiere** de `/api/v1/openapi.json`; es la ruta que publica `l5-swagger` por defecto |
+> | Versiones | `l5-swagger` 11.1.0 · `swagger-php` 6.6.0 |
+> | Sintaxis | **Atributos PHP 8** (`#[OA\...]`) — las anotaciones PHPDoc están derogadas |
+> | `bearerAuth` | Declarado en `Controller.php` y funcional ✅ |
+> | Cobertura | 10/10 endpoints existentes, en 3 tags: `Autenticacion`, `Catalogos`, `Usuarios` ✅ |
+>
+> **Regenerar tras cada cambio de endpoint:** `php artisan l5-swagger:generate`.
+> La regla de mantenimiento de esta sección sigue plenamente vigente.
+
 **Ejemplo de anotación (referencia, no normativa):**
 
+> **⚠️ Actualizado 2026-08-20.** El ejemplo original de esta sección usaba
+> anotaciones PHPDoc (`/** @OA\... */`). Ese estilo quedó **derogado**:
+> `zircote/swagger-php` 6.x lo abandonó en favor de los **atributos nativos de
+> PHP 8**. Con el estilo antiguo, la generación falla con el mensaje engañoso
+> `Required @OA\Info() not found`. La sintaxis vigente es:
+
 ```php
-/**
- * @OA\Post(
- *   path="/api/v1/auth/login",
- *   tags={"Auth"},
- *   summary="Inicia sesión y devuelve un Bearer token",
- *   @OA\RequestBody(required=true,
- *     @OA\JsonContent(required={"email","password"},
- *       @OA\Property(property="email", type="string", format="email"),
- *       @OA\Property(property="password", type="string", format="password")
- *     )
- *   ),
- *   @OA\Response(response=200, description="Token emitido"),
- *   @OA\Response(response=422, description="Credenciales inválidas")
- * )
- */
+use OpenApi\Attributes as OA;
+
+#[OA\Post(
+    path: '/auth/login',
+    summary: 'Inicia sesion y devuelve un Bearer token',
+    tags: ['Autenticacion'],
+    requestBody: new OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            required: ['email', 'password'],
+            properties: [
+                new OA\Property(property: 'email', type: 'string', format: 'email'),
+                new OA\Property(property: 'password', type: 'string', format: 'password'),
+            ]
+        )
+    ),
+    responses: [
+        new OA\Response(response: 200, description: 'Token emitido'),
+        new OA\Response(response: 422, description: 'Credenciales invalidas'),
+    ]
+)]
+public function login(Request $request): JsonResponse
 ```
+
+> **Regla de ubicación:** el atributo debe quedar inmediatamente antes de la
+> firma del método. Un comentario intercalado entre ambos rompe la asociación y
+> el endpoint no se documenta.
+>
+> **Endpoints protegidos:** añadir `security: [['bearerAuth' => []]]` al
+> atributo. Esto activa el candado en Swagger UI y permite probarlos con el
+> token pegado en el botón *Authorize*.
 
 > **Alcance para la evaluación.** Swagger es una mejora profesional acordada por
 > el equipo. Se prioriza documentar primero los endpoints que cubre la rúbrica
