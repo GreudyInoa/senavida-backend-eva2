@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use OpenApi\Attributes as OA;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -10,23 +11,126 @@ use Illuminate\Http\Request;
 class UserController extends Controller
 {
     /**
-     * Registra un nuevo usuario (funcionario del sistema).
-     * Solo un admin_institucional puede hacerlo, y únicamente
-     * para su propio centro de salud.
+     * Lista los usuarios visibles para quien hace la petición.
+     * super_admin ve todos; admin_institucional solo los de su propio centro.
      */
-    public function register(Request $request): JsonResponse
+    #[OA\Get(
+        path: '/users',
+        summary: 'Listar usuarios',
+        description: 'Devuelve los usuarios visibles para quien hace la peticion. El super_admin ve todos; el admin_institucional solo los de su propio centro de salud.',
+        tags: ['Usuarios'],
+        security: [['bearerAuth' => []]],
+        responses: [
+            new OA\Response(response: 200, description: 'Listado de usuarios'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Sin permiso para listar usuarios'),
+        ]
+    )]
+    public function index(Request $request): JsonResponse
     {
+        $this->authorize('viewAny', User::class);
+
         $admin = $request->user();
 
-        // 1. Verificar que quien hace la petición sea admin_institucional o super_admin
-        if (! in_array($admin->role, ['super_admin', 'admin_institucional'])) {
-            return response()->json([
-                'success' => false,
-                'error'   => ['message' => 'No tienes permiso para registrar usuarios.'],
-            ], 403);
+        $query = User::query();
+
+        if ($admin->role === 'admin_institucional') {
+            $query->where('health_center_id', $admin->health_center_id);
         }
 
-        // 2. Validar los datos del nuevo usuario
+        $users = $query->get();
+
+        return response()->json([
+            'success' => true,
+            'data'    => $users->map(fn ($user) => [
+                'id'             => $user->id,
+                'name'           => $user->name,
+                'email'          => $user->email,
+                'role'           => $user->role,
+                'organizationId' => $user->organization_id,
+                'healthCenterId' => $user->health_center_id,
+                'unitId'         => $user->unit_id,
+                'isActive'       => $user->is_active,
+            ]),
+        ], 200);
+    }
+
+    /**
+     * Devuelve el detalle de un usuario específico.
+     */
+    #[OA\Get(
+        path: '/users/{id}',
+        summary: 'Ver un usuario',
+        description: 'Devuelve el detalle de un usuario. El admin_institucional solo puede ver usuarios de su propio centro.',
+        tags: ['Usuarios'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'id', description: 'UUID del usuario', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Datos del usuario'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Sin permiso para ver este usuario'),
+            new OA\Response(response: 404, description: 'Usuario no encontrado'),
+        ]
+    )]
+    public function show(User $user): JsonResponse
+    {
+        $this->authorize('view', $user);
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'             => $user->id,
+                'name'           => $user->name,
+                'email'          => $user->email,
+                'role'           => $user->role,
+                'organizationId' => $user->organization_id,
+                'healthCenterId' => $user->health_center_id,
+                'unitId'         => $user->unit_id,
+                'isActive'       => $user->is_active,
+            ],
+        ], 200);
+    }
+
+    /**
+     * Registra un nuevo usuario (funcionario del sistema).
+     */
+    #[OA\Post(
+        path: '/users',
+        summary: 'Registrar un nuevo usuario',
+        description: 'Crea un usuario del personal de salud. Solo super_admin o admin_institucional pueden hacerlo, y admin_institucional unicamente dentro de su propio centro de salud. La contrasena se cifra automaticamente con bcrypt.',
+        tags: ['Usuarios'],
+        security: [['bearerAuth' => []]],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['name', 'email', 'password', 'password_confirmation', 'role', 'organizationId', 'healthCenterId', 'unitId'],
+                properties: [
+                    new OA\Property(property: 'name', type: 'string', example: 'Enfermera de Prueba'),
+                    new OA\Property(property: 'email', type: 'string', format: 'email', example: 'enfermera@test.com'),
+                    new OA\Property(property: 'password', type: 'string', format: 'password', example: 'password123'),
+                    new OA\Property(property: 'password_confirmation', type: 'string', format: 'password', example: 'password123'),
+                    new OA\Property(property: 'role', type: 'string', enum: ['super_admin', 'admin_institucional', 'admision', 'categorizacion', 'medico'], example: 'categorizacion'),
+                    new OA\Property(property: 'organizationId', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'healthCenterId', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'unitId', type: 'string', format: 'uuid'),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 201, description: 'Usuario creado correctamente'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Sin permiso, o intento de crear fuera del propio centro'),
+            new OA\Response(response: 422, description: 'Datos invalidos o email duplicado'),
+        ]
+    )]
+    public function register(Request $request): JsonResponse
+    {
+        $this->authorize('create', User::class);
+
+        $admin = $request->user();
+
         $data = $request->validate([
             'name'             => ['required', 'string', 'max:255'],
             'email'            => ['required', 'email', 'unique:users,email'],
@@ -37,15 +141,16 @@ class UserController extends Controller
             'unitId'           => ['required', 'uuid', 'exists:units,id'],
         ]);
 
-        // 3. Verificar que el admin solo registre usuarios en SU propio centro y que tambien lo pueda hacer el super_admin
+        // La Policy 'create' solo valida el ROL (no puede saber el centro de
+        // un usuario que aún no existe). Esta comprobación de multitenancy
+        // se queda aquí, porque depende de un dato que llega en el body.
         if ($admin->role === 'admin_institucional' && $data['healthCenterId'] !== $admin->health_center_id) {
             return response()->json([
                 'success' => false,
                 'error'   => ['message' => 'Solo puedes registrar usuarios en tu propio centro de salud.'],
-             ], 403);
+            ], 403);
         }
 
-        // 4. Crear el usuario (la contraseña se cifra automáticamente)
         $user = User::create([
             'name'              => $data['name'],
             'email'             => $data['email'],
@@ -57,7 +162,6 @@ class UserController extends Controller
             'is_active'         => true,
         ]);
 
-        // 5. Responder con los datos del usuario creado (sin la contraseña)
         return response()->json([
             'success' => true,
             'data'    => [
@@ -70,5 +174,101 @@ class UserController extends Controller
                 ],
             ],
         ], 201);
+    }
+
+    /**
+     * Actualiza los datos de un usuario existente.
+     */
+    #[OA\Put(
+        path: '/users/{id}',
+        summary: 'Editar un usuario',
+        description: 'Actualiza los datos de un usuario. El admin_institucional solo puede editar usuarios de su propio centro.',
+        tags: ['Usuarios'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'id', description: 'UUID del usuario', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'name', type: 'string', example: 'Enfermera Actualizada'),
+                    new OA\Property(property: 'email', type: 'string', format: 'email', example: 'nueva@test.com'),
+                    new OA\Property(property: 'role', type: 'string', enum: ['super_admin', 'admin_institucional', 'admision', 'categorizacion', 'medico']),
+                    new OA\Property(property: 'password', type: 'string', format: 'password', example: 'nuevaClave123'),
+                    new OA\Property(property: 'password_confirmation', type: 'string', format: 'password', example: 'nuevaClave123'),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 200, description: 'Usuario actualizado'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Sin permiso para editar este usuario'),
+            new OA\Response(response: 404, description: 'Usuario no encontrado'),
+            new OA\Response(response: 422, description: 'Datos invalidos'),
+        ]
+    )]
+    public function update(Request $request, User $user): JsonResponse
+    {
+        $this->authorize('update', $user);
+
+        $data = $request->validate([
+            'name'     => ['sometimes', 'string', 'max:255'],
+            'email'    => ['sometimes', 'email', 'unique:users,email,'.$user->id],
+            'role'     => ['sometimes', 'in:super_admin,admin_institucional,admision,categorizacion,medico'],
+            'password' => ['sometimes', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $user->fill($data);
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'             => $user->id,
+                'name'           => $user->name,
+                'email'          => $user->email,
+                'role'           => $user->role,
+                'organizationId' => $user->organization_id,
+                'healthCenterId' => $user->health_center_id,
+                'unitId'         => $user->unit_id,
+                'isActive'       => $user->is_active,
+            ],
+        ], 200);
+    }
+
+    /**
+     * Desactiva un usuario (soft delete). No borra el registro.
+     */
+    #[OA\Delete(
+        path: '/users/{id}',
+        summary: 'Desactivar un usuario',
+        description: 'Marca al usuario como inactivo (isActive=false). No elimina el registro de la base de datos.',
+        tags: ['Usuarios'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'id', description: 'UUID del usuario', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Usuario desactivado'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Sin permiso, o intento de autodesactivacion'),
+            new OA\Response(response: 404, description: 'Usuario no encontrado'),
+        ]
+    )]
+    public function destroy(User $user): JsonResponse
+    {
+        $this->authorize('delete', $user);
+
+        $user->is_active = false;
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'       => $user->id,
+                'isActive' => $user->is_active,
+            ],
+        ], 200);
     }
 }

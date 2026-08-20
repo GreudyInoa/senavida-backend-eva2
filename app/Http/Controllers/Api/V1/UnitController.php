@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use OpenApi\Attributes as OA;
 use App\Http\Controllers\Controller;
 use App\Models\Unit;
 use Illuminate\Http\JsonResponse;
@@ -13,6 +14,28 @@ class UnitController extends Controller
      * Lista las unidades activas. Si se envía healthCenterId,
      * filtra solo las unidades de ese centro.
      */
+
+        #[OA\Get(
+        path: '/units',
+        summary: 'Listar unidades',
+        description: 'Devuelve las unidades del sistema. Si se envia el parametro healthCenterId, filtra solo las de ese centro.',
+        tags: ['Catalogos'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(
+                name: 'healthCenterId',
+                description: 'UUID del centro de salud para filtrar sus unidades (opcional)',
+                in: 'query',
+                required: false,
+                schema: new OA\Schema(type: 'string', format: 'uuid')
+            ),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Listado de unidades'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+        ]
+    )]
+
     public function index(Request $request): JsonResponse
     {
         $query = Unit::where('is_active', true);
@@ -38,6 +61,31 @@ class UnitController extends Controller
      * super_admin: puede crear en cualquier centro.
      * admin_institucional: solo puede crear en SU propio centro.
      */
+
+        #[OA\Post(
+        path: '/units',
+        summary: 'Crear unidad',
+        description: 'Crea una unidad dentro de un centro de salud. El super_admin puede crearla en cualquier centro; el admin_institucional solo en el suyo.',
+        tags: ['Catalogos'],
+        security: [['bearerAuth' => []]],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['name', 'healthCenterId'],
+                properties: [
+                    new OA\Property(property: 'name', type: 'string', example: 'Urgencia Adulto'),
+                    new OA\Property(property: 'healthCenterId', type: 'string', format: 'uuid'),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 201, description: 'Unidad creada'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Sin permiso, o fuera del propio centro'),
+            new OA\Response(response: 422, description: 'Datos invalidos'),
+        ]
+    )]
+    
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();

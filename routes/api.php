@@ -14,7 +14,11 @@ Route::prefix('v1')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
 
+        Route::get('/users', [UserController::class, 'index']);
         Route::post('/users', [UserController::class, 'register']);
+        Route::get('/users/{user}', [UserController::class, 'show']);
+        Route::put('/users/{user}', [UserController::class, 'update']);
+        Route::delete('/users/{user}', [UserController::class, 'destroy']);
 
         Route::get('/organizations', [OrganizationController::class, 'index']);
         Route::post('/organizations', [OrganizationController::class, 'store']);
