@@ -13,8 +13,7 @@ class HealthCenterController extends Controller
     /**
      * Lista todos los centros de salud activos.
      */
-    
-        #[OA\Get(
+    #[OA\Get(
         path: '/health-centers',
         summary: 'Listar centros de salud',
         description: 'Devuelve todos los centros de salud, cada uno con el organizationId al que pertenece.',
@@ -27,6 +26,8 @@ class HealthCenterController extends Controller
     )]
     public function index(): JsonResponse
     {
+        $this->authorize('viewAny', HealthCenter::class);
+
         $healthCenters = HealthCenter::where('is_active', true)->get();
 
         return response()->json([
@@ -35,7 +36,42 @@ class HealthCenterController extends Controller
                 'id'             => $center->id,
                 'name'           => $center->name,
                 'organizationId' => $center->organization_id,
+                'isActive'       => $center->is_active,
             ]),
+        ], 200);
+    }
+
+    /**
+     * Muestra el detalle de un centro de salud.
+     */
+    #[OA\Get(
+        path: '/health-centers/{id}',
+        summary: 'Ver un centro de salud',
+        description: 'Devuelve el detalle de un centro de salud especifico.',
+        tags: ['Catalogos'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'id', description: 'UUID del centro de salud', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Datos del centro de salud'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Sin permiso'),
+            new OA\Response(response: 404, description: 'Centro de salud no encontrado'),
+        ]
+    )]
+    public function show(HealthCenter $healthCenter): JsonResponse
+    {
+        $this->authorize('view', $healthCenter);
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'             => $healthCenter->id,
+                'name'           => $healthCenter->name,
+                'organizationId' => $healthCenter->organization_id,
+                'isActive'       => $healthCenter->is_active,
+            ],
         ], 200);
     }
 
@@ -43,8 +79,7 @@ class HealthCenterController extends Controller
      * Crea un centro de salud nuevo.
      * Solo un super_admin puede hacerlo.
      */
-    
-        #[OA\Post(
+    #[OA\Post(
         path: '/health-centers',
         summary: 'Crear centro de salud',
         description: 'Crea un nuevo centro de salud dentro de una organizacion. Solo el super_admin puede hacerlo.',
@@ -67,31 +102,21 @@ class HealthCenterController extends Controller
             new OA\Response(response: 422, description: 'Datos invalidos'),
         ]
     )]
-
     public function store(Request $request): JsonResponse
     {
-        // 1. Verificar que quien hace la petición sea super_admin
-        if ($request->user()->role !== 'super_admin') {
-            return response()->json([
-                'success' => false,
-                'error'   => ['message' => 'No tienes permiso para crear centros de salud.'],
-            ], 403);
-        }
+        $this->authorize('create', HealthCenter::class);
 
-        // 2. Validar los datos
         $data = $request->validate([
             'name'           => ['required', 'string', 'max:255'],
             'organizationId' => ['required', 'uuid', 'exists:organizations,id'],
         ]);
 
-        // 3. Crear el centro
         $healthCenter = HealthCenter::create([
             'name'            => $data['name'],
             'organization_id' => $data['organizationId'],
             'is_active'       => true,
         ]);
 
-        // 4. Responder con los datos creados
         return response()->json([
             'success' => true,
             'data'    => [
@@ -100,5 +125,92 @@ class HealthCenterController extends Controller
                 'organizationId' => $healthCenter->organization_id,
             ],
         ], 201);
+    }
+
+    /**
+     * Actualiza un centro de salud existente.
+     */
+    #[OA\Put(
+        path: '/health-centers/{id}',
+        summary: 'Editar un centro de salud',
+        description: 'Actualiza los datos de un centro de salud. Solo el super_admin puede hacerlo.',
+        tags: ['Catalogos'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'id', description: 'UUID del centro de salud', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'name', type: 'string', example: 'Hospital San Rafael Actualizado'),
+                    new OA\Property(property: 'organizationId', type: 'string', format: 'uuid'),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 200, description: 'Centro de salud actualizado'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Solo super_admin puede editar centros'),
+            new OA\Response(response: 404, description: 'Centro de salud no encontrado'),
+            new OA\Response(response: 422, description: 'Datos invalidos'),
+        ]
+    )]
+    public function update(Request $request, HealthCenter $healthCenter): JsonResponse
+    {
+        $this->authorize('update', $healthCenter);
+
+        $data = $request->validate([
+            'name'           => ['sometimes', 'string', 'max:255'],
+            'organizationId' => ['sometimes', 'uuid', 'exists:organizations,id'],
+        ]);
+
+        $healthCenter->fill($data);
+        $healthCenter->save();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'             => $healthCenter->id,
+                'name'           => $healthCenter->name,
+                'organizationId' => $healthCenter->organization_id,
+                'isActive'       => $healthCenter->is_active,
+            ],
+        ], 200);
+    }
+
+    /**
+     * Desactiva un centro de salud (soft delete). No borra el registro.
+     */
+    #[OA\Delete(
+        path: '/health-centers/{id}',
+        summary: 'Desactivar un centro de salud',
+        description: 'Marca el centro de salud como inactivo (isActive=false). No elimina el registro de la base de datos.',
+        tags: ['Catalogos'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'id', description: 'UUID del centro de salud', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Centro de salud desactivado'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Solo super_admin puede desactivar centros'),
+            new OA\Response(response: 404, description: 'Centro de salud no encontrado'),
+        ]
+    )]
+    public function destroy(HealthCenter $healthCenter): JsonResponse
+    {
+        $this->authorize('delete', $healthCenter);
+
+        $healthCenter->is_active = false;
+        $healthCenter->save();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'       => $healthCenter->id,
+                'isActive' => $healthCenter->is_active,
+            ],
+        ], 200);
     }
 }

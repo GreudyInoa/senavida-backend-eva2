@@ -25,6 +25,4 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
-
-# Swagger - documentacion generada automaticamente
 /storage/api-docs

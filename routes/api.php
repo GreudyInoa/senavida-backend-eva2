@@ -22,11 +22,20 @@ Route::prefix('v1')->group(function () {
 
         Route::get('/organizations', [OrganizationController::class, 'index']);
         Route::post('/organizations', [OrganizationController::class, 'store']);
+        Route::get('/organizations/{organization}', [OrganizationController::class, 'show']);
+        Route::put('/organizations/{organization}', [OrganizationController::class, 'update']);
+        Route::delete('/organizations/{organization}', [OrganizationController::class, 'destroy']);
 
         Route::get('/health-centers', [HealthCenterController::class, 'index']);
         Route::post('/health-centers', [HealthCenterController::class, 'store']);
+        Route::get('/health-centers/{healthCenter}', [HealthCenterController::class, 'show']);
+        Route::put('/health-centers/{healthCenter}', [HealthCenterController::class, 'update']);
+        Route::delete('/health-centers/{healthCenter}', [HealthCenterController::class, 'destroy']);
 
         Route::get('/units', [UnitController::class, 'index']);
         Route::post('/units', [UnitController::class, 'store']);
+        Route::get('/units/{unit}', [UnitController::class, 'show']);
+        Route::put('/units/{unit}', [UnitController::class, 'update']);
+        Route::delete('/units/{unit}', [UnitController::class, 'destroy']);
     });
 });
