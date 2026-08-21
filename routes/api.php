@@ -3,12 +3,14 @@
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\HealthCenterController;
 use App\Http\Controllers\Api\V1\OrganizationController;
+use App\Http\Controllers\Api\V1\PatientController;
 use App\Http\Controllers\Api\V1\UnitController;
 use App\Http\Controllers\Api\V1\UserController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::post('/patients', [PatientController::class, 'store']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
@@ -41,5 +43,8 @@ Route::prefix('v1')->group(function () {
         Route::put('/units/{unit}', [UnitController::class, 'update']);
         Route::delete('/units/{unit}', [UnitController::class, 'destroy']);
         Route::patch('/units/{unit}/restore', [UnitController::class, 'restore']);
+
+        Route::get('/patients', [PatientController::class, 'index']);
+        Route::get('/patients/{patient}', [PatientController::class, 'show']);
     });
 });
