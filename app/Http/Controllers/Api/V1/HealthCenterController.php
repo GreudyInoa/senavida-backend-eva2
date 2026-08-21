@@ -19,16 +19,28 @@ class HealthCenterController extends Controller
         description: 'Devuelve todos los centros de salud, cada uno con el organizationId al que pertenece.',
         tags: ['Catalogos'],
         security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'status', description: 'Filtrar por estado: active (por defecto), inactive, all', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['active', 'inactive', 'all'])),
+        ],
         responses: [
             new OA\Response(response: 200, description: 'Listado de centros de salud'),
             new OA\Response(response: 401, description: 'No autenticado'),
         ]
     )]
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $this->authorize('viewAny', HealthCenter::class);
 
-        $healthCenters = HealthCenter::where('is_active', true)->get();
+        $query = HealthCenter::query();
+
+        $status = $request->query('status', 'active');
+        if ($status === 'active') {
+            $query->where('is_active', true);
+        } elseif ($status === 'inactive') {
+            $query->where('is_active', false);
+        }
+
+        $healthCenters = $query->get();
 
         return response()->json([
             'success' => true,
@@ -180,12 +192,14 @@ class HealthCenterController extends Controller
     }
 
     /**
-     * Desactiva un centro de salud (soft delete). No borra el registro.
+     * Desactiva un centro de salud (soft delete). Bloqueado si tiene
+     * unidades activas, para no dejar el sistema en un estado
+     * inconsistente.
      */
     #[OA\Delete(
         path: '/health-centers/{id}',
         summary: 'Desactivar un centro de salud',
-        description: 'Marca el centro de salud como inactivo (isActive=false). No elimina el registro de la base de datos.',
+        description: 'Marca el centro de salud como inactivo (isActive=false). Se rechaza si tiene unidades activas.',
         tags: ['Catalogos'],
         security: [['bearerAuth' => []]],
         parameters: [
@@ -196,13 +210,58 @@ class HealthCenterController extends Controller
             new OA\Response(response: 401, description: 'No autenticado'),
             new OA\Response(response: 403, description: 'Solo super_admin puede desactivar centros'),
             new OA\Response(response: 404, description: 'Centro de salud no encontrado'),
+            new OA\Response(response: 409, description: 'Tiene unidades activas, no se puede desactivar'),
         ]
     )]
     public function destroy(HealthCenter $healthCenter): JsonResponse
     {
         $this->authorize('delete', $healthCenter);
 
+        $unidadesActivas = $healthCenter->units()->where('is_active', true)->count();
+
+        if ($unidadesActivas > 0) {
+            return response()->json([
+                'success' => false,
+                'error'   => ['message' => "No puedes desactivar este centro porque tiene {$unidadesActivas} unidad(es) activa(s). Desactivalas primero."],
+            ], 409);
+        }
+
         $healthCenter->is_active = false;
+        $healthCenter->save();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'       => $healthCenter->id,
+                'isActive' => $healthCenter->is_active,
+            ],
+        ], 200);
+    }
+
+    /**
+     * Reactiva un centro de salud previamente desactivado.
+     */
+    #[OA\Patch(
+        path: '/health-centers/{id}/restore',
+        summary: 'Reactivar un centro de salud',
+        description: 'Marca el centro como activo (isActive=true). Solo el super_admin puede hacerlo.',
+        tags: ['Catalogos'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'id', description: 'UUID del centro de salud', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Centro de salud reactivado'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Solo super_admin puede reactivar centros'),
+            new OA\Response(response: 404, description: 'Centro de salud no encontrado'),
+        ]
+    )]
+    public function restore(HealthCenter $healthCenter): JsonResponse
+    {
+        $this->authorize('restore', $healthCenter);
+
+        $healthCenter->is_active = true;
         $healthCenter->save();
 
         return response()->json([

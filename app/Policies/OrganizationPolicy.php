@@ -48,8 +48,8 @@ class OrganizationPolicy
     }
 
     public function restore(User $user, Organization $organization): bool
-    {
-        return false;
+   {
+        return $user->role === 'super_admin';
     }
 
     public function forceDelete(User $user, Organization $organization): bool

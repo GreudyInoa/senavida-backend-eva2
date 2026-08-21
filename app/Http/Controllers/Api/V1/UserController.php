@@ -20,6 +20,9 @@ class UserController extends Controller
         description: 'Devuelve los usuarios visibles para quien hace la peticion. El super_admin ve todos; el admin_institucional solo los de su propio centro de salud.',
         tags: ['Usuarios'],
         security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'status', description: 'Filtrar por estado: active (por defecto), inactive, all', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['active', 'inactive', 'all'])),
+        ],
         responses: [
             new OA\Response(response: 200, description: 'Listado de usuarios'),
             new OA\Response(response: 401, description: 'No autenticado'),
@@ -36,6 +39,13 @@ class UserController extends Controller
 
         if ($admin->role === 'admin_institucional') {
             $query->where('health_center_id', $admin->health_center_id);
+        }
+
+        $status = $request->query('status', 'active');
+        if ($status === 'active') {
+            $query->where('is_active', true);
+        } elseif ($status === 'inactive') {
+            $query->where('is_active', false);
         }
 
         $users = $query->get();
@@ -141,9 +151,6 @@ class UserController extends Controller
             'unitId'           => ['required', 'uuid', 'exists:units,id'],
         ]);
 
-        // La Policy 'create' solo valida el ROL (no puede saber el centro de
-        // un usuario que aún no existe). Esta comprobación de multitenancy
-        // se queda aquí, porque depende de un dato que llega en el body.
         if ($admin->role === 'admin_institucional' && $data['healthCenterId'] !== $admin->health_center_id) {
             return response()->json([
                 'success' => false,
@@ -261,6 +268,41 @@ class UserController extends Controller
         $this->authorize('delete', $user);
 
         $user->is_active = false;
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'       => $user->id,
+                'isActive' => $user->is_active,
+            ],
+        ], 200);
+    }
+
+    /**
+     * Reactiva un usuario previamente desactivado.
+     */
+    #[OA\Patch(
+        path: '/users/{id}/restore',
+        summary: 'Reactivar un usuario',
+        description: 'Marca al usuario como activo (isActive=true). El admin_institucional solo puede reactivar usuarios de su propio centro.',
+        tags: ['Usuarios'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'id', description: 'UUID del usuario', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Usuario reactivado'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Sin permiso para reactivar este usuario'),
+            new OA\Response(response: 404, description: 'Usuario no encontrado'),
+        ]
+    )]
+    public function restore(User $user): JsonResponse
+    {
+        $this->authorize('restore', $user);
+
+        $user->is_active = true;
         $user->save();
 
         return response()->json([

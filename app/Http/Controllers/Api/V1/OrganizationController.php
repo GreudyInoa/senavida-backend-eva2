@@ -19,16 +19,28 @@ class OrganizationController extends Controller
         description: 'Devuelve todas las organizaciones de salud registradas en el sistema.',
         tags: ['Catalogos'],
         security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'status', description: 'Filtrar por estado: active (por defecto), inactive, all', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['active', 'inactive', 'all'])),
+        ],
         responses: [
             new OA\Response(response: 200, description: 'Listado de organizaciones'),
             new OA\Response(response: 401, description: 'No autenticado'),
         ]
     )]
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $this->authorize('viewAny', Organization::class);
 
-        $organizations = Organization::where('is_active', true)->get();
+        $query = Organization::query();
+
+        $status = $request->query('status', 'active');
+        if ($status === 'active') {
+            $query->where('is_active', true);
+        } elseif ($status === 'inactive') {
+            $query->where('is_active', false);
+        }
+
+        $organizations = $query->get();
 
         return response()->json([
             'success' => true,
@@ -171,12 +183,14 @@ class OrganizationController extends Controller
     }
 
     /**
-     * Desactiva una organización (soft delete). No borra el registro.
+     * Desactiva una organización (soft delete). Bloqueado si tiene
+     * centros de salud activos, para no dejar el sistema en un
+     * estado inconsistente.
      */
     #[OA\Delete(
         path: '/organizations/{id}',
         summary: 'Desactivar una organizacion',
-        description: 'Marca la organizacion como inactiva (isActive=false). No elimina el registro de la base de datos.',
+        description: 'Marca la organizacion como inactiva (isActive=false). Se rechaza si tiene centros de salud activos.',
         tags: ['Catalogos'],
         security: [['bearerAuth' => []]],
         parameters: [
@@ -187,13 +201,58 @@ class OrganizationController extends Controller
             new OA\Response(response: 401, description: 'No autenticado'),
             new OA\Response(response: 403, description: 'Solo super_admin puede desactivar organizaciones'),
             new OA\Response(response: 404, description: 'Organizacion no encontrada'),
+            new OA\Response(response: 409, description: 'Tiene centros de salud activos, no se puede desactivar'),
         ]
     )]
     public function destroy(Organization $organization): JsonResponse
     {
         $this->authorize('delete', $organization);
 
+        $centrosActivos = $organization->healthCenters()->where('is_active', true)->count();
+
+        if ($centrosActivos > 0) {
+            return response()->json([
+                'success' => false,
+                'error'   => ['message' => "No puedes desactivar esta organizacion porque tiene {$centrosActivos} centro(s) de salud activo(s). Desactivalos primero."],
+            ], 409);
+        }
+
         $organization->is_active = false;
+        $organization->save();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'       => $organization->id,
+                'isActive' => $organization->is_active,
+            ],
+        ], 200);
+    }
+
+    /**
+     * Reactiva una organización previamente desactivada.
+     */
+    #[OA\Patch(
+        path: '/organizations/{id}/restore',
+        summary: 'Reactivar una organizacion',
+        description: 'Marca la organizacion como activa (isActive=true). Solo el super_admin puede hacerlo.',
+        tags: ['Catalogos'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'id', description: 'UUID de la organizacion', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Organizacion reactivada'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Solo super_admin puede reactivar organizaciones'),
+            new OA\Response(response: 404, description: 'Organizacion no encontrada'),
+        ]
+    )]
+    public function restore(Organization $organization): JsonResponse
+    {
+        $this->authorize('restore', $organization);
+
+        $organization->is_active = true;
         $organization->save();
 
         return response()->json([

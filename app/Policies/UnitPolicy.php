@@ -76,7 +76,15 @@ class UnitPolicy
 
     public function restore(User $user, Unit $unit): bool
     {
-        return false;
+        if (! in_array($user->role, ['super_admin', 'admin_institucional'])) {
+            return false;
+        }
+
+        if ($user->role === 'admin_institucional') {
+            return $unit->health_center_id === $user->health_center_id;
+        }
+
+        return true;
     }
 
     public function forceDelete(User $user, Unit $unit): bool

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use OpenApi\Attributes as OA;
 use App\Http\Controllers\Controller;
 use App\Models\Unit;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -21,13 +22,8 @@ class UnitController extends Controller
         tags: ['Catalogos'],
         security: [['bearerAuth' => []]],
         parameters: [
-            new OA\Parameter(
-                name: 'healthCenterId',
-                description: 'UUID del centro de salud para filtrar sus unidades (opcional)',
-                in: 'query',
-                required: false,
-                schema: new OA\Schema(type: 'string', format: 'uuid')
-            ),
+            new OA\Parameter(name: 'healthCenterId', description: 'UUID del centro de salud para filtrar sus unidades (opcional)', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'status', description: 'Filtrar por estado: active (por defecto), inactive, all', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['active', 'inactive', 'all'])),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Listado de unidades'),
@@ -38,7 +34,14 @@ class UnitController extends Controller
     {
         $this->authorize('viewAny', Unit::class);
 
-        $query = Unit::where('is_active', true);
+        $query = Unit::query();
+
+        $status = $request->query('status', 'active');
+        if ($status === 'active') {
+            $query->where('is_active', true);
+        } elseif ($status === 'inactive') {
+            $query->where('is_active', false);
+        }
 
         if ($request->has('healthCenterId')) {
             $query->where('health_center_id', $request->query('healthCenterId'));
@@ -130,9 +133,6 @@ class UnitController extends Controller
             'healthCenterId' => ['required', 'uuid', 'exists:health_centers,id'],
         ]);
 
-        // La Policy 'create' solo valida el ROL. Esta comprobación de
-        // multitenancy se queda aquí porque depende del healthCenterId
-        // que llega en el body, no de una $unit que ya exista.
         if ($user->role === 'admin_institucional' && $data['healthCenterId'] !== $user->health_center_id) {
             return response()->json([
                 'success' => false,
@@ -209,12 +209,13 @@ class UnitController extends Controller
     }
 
     /**
-     * Desactiva una unidad (soft delete). No borra el registro.
+     * Desactiva una unidad (soft delete). Bloqueado si tiene usuarios
+     * activos, para no dejar el sistema en un estado inconsistente.
      */
     #[OA\Delete(
         path: '/units/{id}',
         summary: 'Desactivar una unidad',
-        description: 'Marca la unidad como inactiva (isActive=false). No elimina el registro de la base de datos.',
+        description: 'Marca la unidad como inactiva (isActive=false). Se rechaza si tiene usuarios activos.',
         tags: ['Catalogos'],
         security: [['bearerAuth' => []]],
         parameters: [
@@ -225,13 +226,58 @@ class UnitController extends Controller
             new OA\Response(response: 401, description: 'No autenticado'),
             new OA\Response(response: 403, description: 'Sin permiso para desactivar esta unidad'),
             new OA\Response(response: 404, description: 'Unidad no encontrada'),
+            new OA\Response(response: 409, description: 'Tiene usuarios activos, no se puede desactivar'),
         ]
     )]
     public function destroy(Unit $unit): JsonResponse
     {
         $this->authorize('delete', $unit);
 
+        $usuariosActivos = User::where('unit_id', $unit->id)->where('is_active', true)->count();
+
+        if ($usuariosActivos > 0) {
+            return response()->json([
+                'success' => false,
+                'error'   => ['message' => "No puedes desactivar esta unidad porque tiene {$usuariosActivos} usuario(s) activo(s). Desactivalos primero."],
+            ], 409);
+        }
+
         $unit->is_active = false;
+        $unit->save();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'       => $unit->id,
+                'isActive' => $unit->is_active,
+            ],
+        ], 200);
+    }
+
+    /**
+     * Reactiva una unidad previamente desactivada.
+     */
+    #[OA\Patch(
+        path: '/units/{id}/restore',
+        summary: 'Reactivar una unidad',
+        description: 'Marca la unidad como activa (isActive=true). El admin_institucional solo puede reactivar unidades de su propio centro.',
+        tags: ['Catalogos'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'id', description: 'UUID de la unidad', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Unidad reactivada'),
+            new OA\Response(response: 401, description: 'No autenticado'),
+            new OA\Response(response: 403, description: 'Sin permiso para reactivar esta unidad'),
+            new OA\Response(response: 404, description: 'Unidad no encontrada'),
+        ]
+    )]
+    public function restore(Unit $unit): JsonResponse
+    {
+        $this->authorize('restore', $unit);
+
+        $unit->is_active = true;
         $unit->save();
 
         return response()->json([

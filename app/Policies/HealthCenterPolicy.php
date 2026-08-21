@@ -49,7 +49,7 @@ class HealthCenterPolicy
 
     public function restore(User $user, HealthCenter $healthCenter): bool
     {
-        return false;
+        return $user->role === 'super_admin';
     }
 
     public function forceDelete(User $user, HealthCenter $healthCenter): bool
