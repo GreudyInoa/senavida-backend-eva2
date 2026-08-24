@@ -2,10 +2,28 @@
 
 **Proyecto:** SEÑAVIDA — Plataforma de comunicación inclusiva en salud
 **Documento:** Contrato oficial Frontend ↔ Backend
-**Versión del contrato:** `2.2.0` — arquitectura **API REST**
+**Versión del contrato:** `2.3.0` — arquitectura **API REST**
 **Estado:** Vigente. Decisiones de arquitectura ratificadas por el equipo y el docente (ver §Decisiones de arquitectura).
 **Fuente:** `BACKEND_IMPLEMENTATION_GUIDE.md` — auditoría del frontend en el commit `41360a8`
-**Fecha:** 2026-08-20 (actualizado v2.2.0)
+**Fecha:** 2026-08-21 (actualizado v2.3.0)
+
+> **Cambios en v2.3.0** (resolución de pendientes e implementaciones):
+> - **`cta.generate` RESUELTO (§E09, §12.2).** El CTA lo genera **el paciente**,
+>   desde un endpoint público; el personal de salud **no** lo genera. Se corrige
+>   `⏳` → `✅ PAC` / `❌ ADI` en la matriz de permisos. Fundamento: si el
+>   funcionario debiera identificar al paciente antes de emitir o validar el
+>   código, el código no cumpliría función alguna.
+> - **Parámetros del CTA ratificados (§E09):** vigencia 60 min · 3 intentos ·
+>   un solo uso · bcrypt · `SV-` + 6 dígitos · máximo un código activo por
+>   paciente.
+> - **`validate` recibe solo `{ code }`**, sin `patient_id`. La búsqueda se acota
+>   a los códigos activos del centro del funcionario autenticado.
+> - **E07 `Patient` IMPLEMENTADO.** Autorregistro público operativo; ningún rol
+>   clínico puede crear, editar ni desactivar la ficha —verificado incluso para
+>   `super_admin`—. `age` se expone como atributo calculado, nunca almacenado.
+> - **E08 `PatientContact` IMPLEMENTADO** como relación 1:N, según lo exigido.
+> - **Mensajes de validación en español** en todo el backend
+>   (`APP_LOCALE=es` + `laravel-lang/common`), incluidos los nombres de campo.
 
 > **Cambios en v2.2.0** (adiciones y correcciones, no rompen v2.1.0):
 > - **Swagger / OpenAPI (A-07) implementado y verificado.** 10/10 endpoints
@@ -1239,6 +1257,38 @@ ContactMessage      (público, fuera del dominio clínico)
 > **Corrección obligatoria.** La edad **NO DEBE** almacenarse: se deriva de la
 > fecha de nacimiento. Almacenarla produce datos obsoletos.
 
+> **✅ IMPLEMENTADO Y VERIFICADO (2026-08-21).**
+>
+> | Endpoint | Auth | Roles |
+> |---|---|---|
+> | `POST /patients` | 🔓 **Público** | Autorregistro del propio paciente |
+> | `GET /patients` | 🔒 | `admision`, `categorizacion`, `medico`, `super_admin` |
+> | `GET /patients/{id}` | 🔒 | Mismos roles; incluye sus contactos |
+>
+> **Regla de autonomía cumplida.** `PatientPolicy` devuelve `false` sin excepción
+> de rol en `create`, `update`, `delete`, `restore` y `forceDelete`. Verificado
+> en ejecución: incluso `super_admin` obtiene `false` en `update` y `delete`. No
+> existen rutas `PUT` ni `DELETE` sobre `/patients`.
+>
+> **Cómo se creó el primer registro sin violar la regla.** El paciente no posee
+> credenciales al momento de registrarse, por lo que `POST /patients` es
+> **público**, fuera de `auth:sanctum`. Se protege con límite de frecuencia por
+> dirección IP (5 registros / 10 minutos), no con autenticación.
+>
+> **Edad derivada, no almacenada.** No existe columna `age`. Se expone como
+> atributo calculado sobre `birth_date`. Verificado: nacimiento 1997-11-15
+> devuelve `28`.
+>
+> **Campos persistidos:** `name`, `national_id` (**único**),
+> `national_id_type` (`rut` \| `pasaporte`), `birth_date`, `health_insurance`,
+> `address`, `phone`, `primary_health_center`, `allergies`, `health_conditions`,
+> `communication_preference` (`senas` \| `texto` \| `lectura_labial` \| `mixto`),
+> `is_active`.
+>
+> **Unicidad del documento.** Un mismo `national_id` no puede registrarse dos
+> veces, con independencia del resto de los datos. Verificado: segundo intento
+> con el mismo RUT y datos distintos → `422`.
+
 ---
 
 #### E08 · `PatientContact` 🟦🟩
@@ -1252,6 +1302,22 @@ ContactMessage      (público, fuera del dominio clínico)
 > **Corrección obligatoria.** El frontend modela **un solo contacto anidado** en
 > el paciente, pero una de sus pantallas ofrece **dos contactos** para elegir. La
 > relación **DEBE** ser uno-a-muchos. El objeto anidado singular queda prohibido.
+
+> **✅ IMPLEMENTADO (2026-08-21).** Tabla `patient_contacts` con relación
+> `hasMany` desde `Patient`, tal como exige la corrección. Campos: `patient_id`
+> (FK), `name`, `relationship`, `phone`.
+>
+> `GET /patients/{id}` devuelve el arreglo `contacts` anidado. La corrección
+> queda satisfecha: la estructura es 1:N y no existe el objeto singular.
+>
+> **Borrado en cascada.** A diferencia del resto de las entidades del sistema
+> —que usan desactivación lógica—, `patient_contacts` emplea
+> `cascadeOnDelete()`. Fundamento: un contacto de emergencia carece de sentido
+> sin el paciente al que pertenece; no debe quedar huérfano.
+>
+> ⏳ **Pendiente.** El endpoint de escritura de contactos aún no existe. El
+> paciente los registrará junto con su ficha o mediante un recurso propio, una
+> vez definido el mecanismo de identificación del paciente (§D-XX).
 
 ---
 
@@ -1274,6 +1340,58 @@ ContactMessage      (público, fuera del dominio clínico)
 > **Requisito derivado.** El identificador o el propio código **DEBE** exponerse
 > dentro del recurso `MedicalSession`. La interfaz lo muestra en cinco pantallas
 > y hoy lo tiene fijo en el código porque el modelo no lo entrega.
+
+> **✅ DECISIÓN RATIFICADA (2026-08-21) — quién genera el CTA.**
+> Resuelve el `⏳` de `cta.generate` en la matriz de permisos (§12.2).
+>
+> **El código lo genera el PACIENTE, no el personal de salud.**
+>
+> | Acción | Quién | Autenticación |
+> |---|---|---|
+> | **Generar** el CTA | El propio paciente, desde su app | 🔓 **Endpoint público** |
+> | **Validar** el CTA | `admision` (y `super_admin`) | 🔒 Requiere token |
+> | **Consumir** el CTA | `admision` (y `super_admin`) | 🔒 Requiere token |
+>
+> **Fundamento.** El propósito del CTA es **revelarle a Admisión quién es el
+> paciente**. Si el funcionario tuviera que seleccionar al paciente en pantalla
+> antes de generar o validar el código, el código no cumpliría ninguna función:
+> la identidad ya sería conocida. El flujo correcto es el inverso — el paciente
+> llega con un código, y ese código es lo que lo identifica.
+>
+> Esto es coherente con el origen que la propia guía de implementación asigna al
+> endpoint de generación: *"Paso 01 de la landing — sin UI"*, es decir, parte del
+> recorrido del paciente, no del panel del funcionario.
+>
+> **Consecuencia sobre la validación.** `POST /attention-codes/validate` recibe
+> **únicamente** `{ code }`. No recibe `patient_id`, porque el funcionario no
+> conoce todavía la identidad del paciente. La búsqueda se acota a los códigos
+> **activos del centro de salud del funcionario autenticado**, lo que satisface
+> de forma natural la regla de validación por centro enunciada arriba.
+>
+> **Sobre el modelo de seguridad de un endpoint público de generación.** La
+> seguridad del CTA no descansa en restringir quién lo emite, sino en sus
+> propiedades: vigencia corta, un solo uso, intentos limitados y límite de
+> frecuencia. Es el mismo modelo aplicado al autorregistro de `Patient` (E07).
+
+> **✅ PARÁMETROS RATIFICADOS (2026-08-21).**
+>
+> | Parámetro | Valor | Fundamento |
+> |---|---|---|
+> | Vigencia | **60 minutos** | Cubre el recorrido real de urgencias sin que un código extraviado siga vigente al día siguiente |
+> | Intentos máximos | **3** | Coincide con el valor marcado como *"recomendado"* en el panel de administración del frontend |
+> | Reutilización | **Un solo uso** | Ya declarado en la landing: *"intransferible y de un solo uso"* |
+> | Resumen criptográfico | **bcrypt** | Mismo mecanismo que las contraseñas del personal; permite `Hash::check()` acotado por centro |
+> | Formato | **`SV-` + 6 dígitos** | Formato observado en la interfaz; comparación *case-insensitive* |
+> | Códigos activos por paciente | **Máximo 1** | Generar uno nuevo invalida automáticamente el anterior |
+>
+> **Sobre el máximo de un código activo.** Evita que coexistan dos credenciales
+> válidas para la misma persona —por ejemplo, si el primer código no llegó a
+> mostrarse y el paciente genera otro—. Reduce superficie de ataque y ambigüedad
+> operativa.
+>
+> **El backend no genera imágenes.** El código se emite y se valida como
+> **texto**. Cualquier representación visual (código QR u otra) es
+> responsabilidad del frontend, que la construye a partir del texto recibido.
 
 ---
 
@@ -2571,7 +2689,7 @@ servidor (§12.3).
 | Permiso | ADM | ADI | CAT | MED | PAC |
 |---|:---:|:---:|:---:|:---:|:---:|
 | `cta.validate` | | ✅ | | | |
-| `cta.generate` | | ⏳ | | | ⏳ |
+| `cta.generate` | | ❌ | | | ✅ |
 | `patient.view` | | ✅ | ✅ | ✅ | ✅ propia |
 | `patient.contacts.view` | | | | ✅ | ✅ propios |
 | `patient.edit` | ❌ | ❌ | ❌ | ❌ | ✅ propia |

@@ -495,6 +495,11 @@ Cada requerimiento se presenta así:
 | **Necesita** | Nada |
 | **Resultado esperado** | La ficha se guarda una vez y aparece igual en todas las pantallas que la muestran. |
 
+> **✅ LISTO (2026-08-21).** Se guardan los diez datos pedidos. La **edad no se
+> guarda**: se calcula cada vez a partir de la fecha de nacimiento, para que
+> nunca quede desactualizada. El número de identificación (RUT o pasaporte) **no
+> puede repetirse**: dos personas no pueden registrarse con el mismo documento.
+
 ---
 
 **RF-017 · Impedir que el personal modifique la ficha**
@@ -514,6 +519,20 @@ Cada requerimiento se presenta así:
 > ⚠️ Sin embargo, hoy la misma pantalla **sí permite editar las alergias** en un
 > campo de texto, lo que se contradice con lo que ella misma declara.
 
+> **✅ LISTO (2026-08-21).** No existe ninguna dirección que permita modificar ni
+> borrar la ficha de un paciente. La regla se comprobó ejecutándola: se le
+> preguntó al sistema si el administrador general —el rol con más poder de
+> todos— podía editar o borrar una ficha, y respondió **no** en ambos casos.
+>
+> Quien crea la ficha es **el propio paciente**, desde su aplicación, sin
+> necesitar cuenta ni contraseña. Es la única forma de cumplir la regla: si nadie
+> del personal puede escribirla, el paciente tiene que poder hacerlo él mismo.
+>
+> ⚠️ **Pendiente en el frontend.** El campo de alergias editable que menciona el
+> recuadro anterior sigue ahí. Desde el backend ya no tiene efecto —no hay dónde
+> guardar ese cambio—, pero conviene quitarlo de la pantalla para no prometerle
+> al funcionario algo que no ocurre.
+
 ---
 
 **RF-018 · Guardar los contactos de emergencia**
@@ -529,6 +548,19 @@ Cada requerimiento se presenta así:
 > la pantalla del médico muestra **dos** para elegir. Los dos contactos que
 > muestra están escritos a mano en el código. La forma correcta es permitir
 > varios.
+
+> **🔵 PARCIALMENTE LISTO (2026-08-21).** La contradicción quedó resuelta: la
+> base de datos ya permite **varios contactos por paciente**, no uno solo. Al
+> consultar la ficha de un paciente, sus contactos vienen incluidos en la
+> respuesta.
+>
+> ⏳ **Falta:** la forma de **agregar** contactos. El paciente todavía no tiene
+> cómo registrarlos, porque eso depende de definir cómo se identifica el paciente
+> en su propia aplicación (una decisión que aún está abierta).
+>
+> **Un detalle de diseño.** Si se borra un paciente, sus contactos se borran con
+> él. Es distinto al resto del sistema, donde nada se borra de verdad. La razón:
+> un contacto de emergencia sin paciente al que pertenecer no le sirve a nadie.
 
 ---
 
@@ -561,10 +593,37 @@ Cada requerimiento se presenta así:
 | **Necesita** | RF-016 |
 | **Resultado esperado** | Se genera un código, se le muestra **una sola vez** a quien lo pidió, y después ya no se puede volver a ver. |
 
-> **Falta decidir quién lo genera.** El frontend describe el proceso en su
-> página de inicio, pero **no existe ninguna pantalla que genere códigos**. Hay
-> que definir si lo hace el funcionario de admisión, si el paciente lo pide
-> desde su aplicación, o ambos.
+> ~~**Falta decidir quién lo genera.**~~ **✅ DECIDIDO (2026-08-21).**
+>
+> **Lo genera el paciente**, desde su propia aplicación. El personal de salud
+> **no** genera códigos.
+>
+> **Por qué.** El código existe justamente para **decirle a Admisión quién es el
+> paciente**. Si el funcionario tuviera que elegir primero al paciente en su
+> pantalla para poder generarle un código, el código no serviría para nada: ya
+> sabría quién es. El orden correcto es al revés — la persona llega con su
+> código, y ese código la identifica.
+>
+> **Cómo funciona en la práctica:**
+>
+> 1. El paciente ya se registró antes en la aplicación (RF-016)
+> 2. Al llegar a la urgencia, abre la app y pide su código
+> 3. La app le muestra algo como `SV-847291`, válido por una hora
+> 4. Le muestra o le dice ese código al funcionario de admisión
+> 5. El funcionario lo escribe y el sistema le revela quién es el paciente
+>
+> **Decisiones tomadas junto con esta:**
+>
+> | Qué | Cuánto | Por qué |
+> |---|---|---|
+> | Duración | 1 hora | Alcanza para el recorrido real de una urgencia, pero un código perdido no sirve al día siguiente |
+> | Intentos permitidos | 3 | Es el valor que la propia pantalla de administración marca como recomendado |
+> | Cuántas veces se usa | Una sola | Ya está prometido en la página de inicio: *"intransferible y de un solo uso"* |
+> | Códigos activos a la vez | Uno por paciente | Si pide otro, el anterior deja de servir automáticamente |
+>
+> **Sobre el código QR.** El sistema entrega el código como **texto**. Si la app
+> quiere mostrarlo como QR, lo arma ella misma a partir de ese texto — el backend
+> no genera imágenes.
 
 ---
 
@@ -1377,6 +1436,35 @@ Cada requerimiento se presenta así:
 > prioridad Alta. Eso no es un error de estimación: refleja que **el backend no
 > existe todavía**, y que buena parte de lo que falta no es «funcionalidad
 > extra», sino lo mínimo para que el sistema sea seguro y utilizable.
+
+### Avance real del backend — actualizado 2026-08-21
+
+> La frase «el backend no existe todavía» ya no es exacta. Este es el estado a la
+> fecha:
+
+| Módulo | Estado | Detalle |
+|---|:---:|---|
+| A · Inicio de sesión y permisos | ✅ **Listo** | Login real con contraseña cifrada, límite de intentos, cierre de sesión que invalida el acceso de verdad |
+| B · Gestión de usuarios | ✅ **Listo** | Crear, ver, editar, desactivar y reactivar. Con separación por centro de salud |
+| C · Listas fijas | ✅ **Listo** | Organizaciones, centros y unidades, todos con gestión completa |
+| D · Pacientes | 🔵 **Casi listo** | Ficha y contactos funcionando. Falta que el paciente pueda agregar contactos |
+| E · Código de atención | 🔨 **En construcción** | Decisiones tomadas y documentadas; código en desarrollo |
+| F · Sesiones médicas | ⏳ Pendiente | Es lo siguiente después del código de atención |
+| G a O | ⏳ Pendiente | — |
+
+**Además, sin estar en la lista original:**
+
+- **Documentación navegable de la API.** Existe una página web donde se pueden
+  ver y **probar** todos los endpoints sin escribir código, con ejemplos
+  incluidos. Sirve tanto para el equipo como para mostrar el trabajo hecho.
+- **Todo el sistema responde en español.** Los mensajes de error de validación
+  salen traducidos, incluidos los nombres de los campos.
+- **Protección contra borrados peligrosos.** No se puede desactivar una
+  organización que todavía tiene hospitales funcionando, ni un hospital con
+  unidades activas, ni una unidad con personal asignado. El sistema lo impide y
+  explica por qué.
+- **Nada se borra de verdad.** Todo se desactiva y se puede reactivar, así no se
+  pierde historial.
 
 ---
 

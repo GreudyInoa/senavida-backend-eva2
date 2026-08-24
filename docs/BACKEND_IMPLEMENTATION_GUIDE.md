@@ -1307,6 +1307,50 @@ Reglas obligatorias del backend para T1/T2:
 - Verificar que el código pertenece al `health_center_id` del funcionario.
 - Marcar `status='consumed'` y `used_at` al abrir la sesión — **un solo uso**.
 
+> **✅ DECISIONES RATIFICADAS (2026-08-21) — contrato v2.3.0 §E09.**
+>
+> **1. T3 es un endpoint PÚBLICO, y lo consume el paciente.**
+> La columna «Origen» ya lo insinuaba —*"Paso 01 de la landing"*, no un panel de
+> funcionario—, pero conviene explicitarlo: **el paciente genera su propio
+> código** desde su aplicación, sin token. El personal de salud **no** genera
+> códigos.
+>
+> *Fundamento.* El CTA existe para **revelarle a Admisión quién es el paciente**.
+> Si el funcionario tuviera que identificar al paciente antes de emitir el
+> código, el código sería redundante. El flujo correcto es el inverso.
+>
+> *Consecuencia sobre el cuerpo de T3.* El paciente indica el centro donde se
+> encuentra. La columna «Envía» se mantiene, pero `health_center_id` proviene del
+> paciente, no de la sesión de un funcionario. `403 sin permiso` deja de aplicar:
+> el endpoint es público y se protege con límite de frecuencia.
+>
+> **2. T1 recibe únicamente `{code}` — confirmado.**
+> Sin `patient_id`. El funcionario no conoce aún la identidad. Dado que el
+> resumen se calcula con **bcrypt** (no admite búsqueda directa por hash), la
+> comparación se realiza con `Hash::check()` sobre los códigos **activos del
+> centro del funcionario autenticado**. Ese acotamiento satisface por
+> construcción la regla de validación por centro enunciada arriba.
+>
+> **3. Parámetros.**
+>
+> | Parámetro | Valor |
+> |---|---|
+> | Vigencia | 60 minutos |
+> | `max_attempts` | 3 |
+> | Reutilización | Un solo uso |
+> | Resumen | bcrypt |
+> | Formato | `SV-` + 6 dígitos, *case-insensitive* |
+> | Códigos activos por paciente | Máximo 1 — generar uno nuevo invalida el anterior |
+>
+> **4. El backend no genera imágenes.** El código se emite y valida como
+> **texto**. Cualquier representación visual (QR u otra) la construye el
+> frontend a partir de ese texto.
+>
+> **5. Orden de implementación.** T3 y T1 se construyen en el hito del CTA; **T2
+> se difiere** al hito de `MedicalSession`, ya que su respuesta es precisamente
+> una sesión médica y ese modelo no existe antes. Esto respeta además la
+> separación deliberada entre validar y consumir descrita en `RF-023`.
+
 ### 6.4 M4 · Paciente
 
 | # | Método | Ruta | Origen | Notas |
@@ -1318,6 +1362,34 @@ Reglas obligatorias del backend para T1/T2:
 > La ficha es **de solo lectura para el personal** — regla explícita en
 > `DashboardAdmision.tsx:159`. **No debe existir** `PUT /patients/{id}` accesible
 > a roles clínicos. Si el paciente edita sus datos, es desde su app.
+
+> **✅ IMPLEMENTADO (2026-08-21).**
+>
+> | # | Método | Ruta | Auth | Estado |
+> |---|---|---|---|---|
+> | — | `POST` | `/patients` | 🔓 Público | ✅ Autorregistro del paciente |
+> | — | `GET` | `/patients` | 🔒 | ✅ Listado para personal clínico |
+> | P1 | `GET` | `/patients/{id}` | 🔒 | ✅ Ficha completa **con `contacts` anidados** |
+> | P2 | `GET` | `/patients/{id}/contacts` | — | ➖ Innecesario: P1 ya los devuelve |
+> | P3 | `GET` | `/patient/me` | — | ⏳ Requiere el mecanismo de autenticación del paciente |
+>
+> **Regla de solo lectura cumplida.** No existen rutas `PUT` ni `DELETE` sobre
+> `/patients`. `PatientPolicy` devuelve `false` sin excepción en `create`,
+> `update` y `delete`; verificado en ejecución que ni siquiera `super_admin`
+> puede modificar la ficha.
+>
+> **Nota sobre P1 y «solo tras validar CTA».** La restricción declarada en la
+> tabla —*"Solo tras validar CTA"*— **todavía no se aplica**: hoy cualquier rol
+> clínico autorizado puede consultar cualquier ficha por su identificador. El
+> refuerzo natural de esa regla es el módulo de sesión médica, que atará la
+> lectura de la ficha a una atención abierta. Queda anotado como pendiente.
+>
+> **`age` derivado.** No se persiste; se expone como atributo calculado sobre
+> `birth_date`, conforme a la corrección del contrato.
+>
+> **Contactos de emergencia.** Relación 1:N implementada (`patient_contacts`),
+> resolviendo la incompatibilidad descrita en §E7. El endpoint de **escritura**
+> de contactos queda pendiente junto con P3.
 
 ### 6.5 M5 · Sesión médica
 
