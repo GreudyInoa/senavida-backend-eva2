@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="capturas/00_portada.png" alt="SeñaVida — comunicación accesible en urgencias" width="100%"/>
+</p>
+
 # 🩺 Informe de Evidencias — Backend SeñaVida
 
 <p align="center">
@@ -5,10 +9,14 @@
   <img src="https://img.shields.io/badge/PHP-8.4-777BB4?style=flat-square&logo=php&logoColor=white" alt="PHP 8.4"/>
   <img src="https://img.shields.io/badge/PostgreSQL-336791?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
   <img src="https://img.shields.io/badge/Sanctum-Bearer%20Token-2E7D32?style=flat-square" alt="Sanctum"/>
+  <img src="https://img.shields.io/badge/Swagger-OpenAPI%203.0-85EA2D?style=flat-square&logo=swagger&logoColor=black" alt="Swagger OpenAPI 3.0"/>
   <img src="https://img.shields.io/badge/Rúbrica-100%2F100-brightgreen?style=flat-square" alt="Rúbrica 100/100"/>
+  <img src="https://img.shields.io/badge/Fase%204-Hitos%201%20y%202-6E48AA?style=flat-square" alt="Fase 4 Hitos 1 y 2"/>
 </p>
 
-> Evidencia completa de funcionamiento del backend de **SeñaVida**, probada endpoint por endpoint con **Postman** y verificada a nivel de base de datos con **Tinker**. Este documento acompaña la entrega del **EVA2** y demuestra, con capturas reales (no simuladas), que el proyecto cumple cada indicador de la rúbrica.
+> Evidencia completa de funcionamiento del backend de **SeñaVida**, probada endpoint por endpoint con **Postman** y **Swagger UI**, y verificada a nivel de base de datos con **Tinker**. Este documento acompaña la entrega del **EVA2** y demuestra, con capturas reales (no simuladas), que el proyecto cumple cada indicador de la rúbrica.
+>
+> **Alcance ampliado.** Las secciones 1–5 corresponden a la entrega original del EVA2. Las secciones 6–10 documentan el trabajo posterior de la **Fase 4**: documentación interactiva con Swagger, CRUD administrativo completo, el **Hito 1** (modelo de Paciente) y el **Hito 2** (Código Temporal de Atención).
 
 | | |
 |---|---|
@@ -17,11 +25,14 @@
 | 📦 **Proyecto** | SeñaVida — Backend API REST |
 | 🔗 **Repositorio** | [`GreudyInoa/senavida-backend-eva2`](https://github.com/GreudyInoa/senavida-backend-eva2) |
 | ⚙️ **Stack** | Laravel 13 · PHP 8.4 · PostgreSQL · Laravel Sanctum |
-| 📅 **Fecha de entrega** | 17 de agosto de 2026 |
+| 📅 **Entrega EVA2** | 17 de agosto de 2026 |
+| 🔄 **Última actualización** | 24 de agosto de 2026 — Fase 4, Hitos 1 y 2 |
 
 ---
 
 ## 📑 Índice
+
+**Entrega EVA2**
 
 1. [¿Qué es este documento y por qué existe?](#1-qué-es-este-documento-y-por-qué-existe)
 2. [Configuración del entorno y la base de datos](#2-configuración-del-entorno-y-la-base-de-datos)
@@ -30,8 +41,25 @@
 5. [Evidencias de Catálogos](#5-evidencias-de-catálogos)
    - 5.1–5.3 Creación de Organización, Centros y Unidades
    - 5.4 Control de roles (RBAC) · 5.5–5.7 Listados · 5.8 Multitenancy
-6. [Cumplimiento de la rúbrica](#6-cumplimiento-de-la-rúbrica)
-7. [Glosario rápido](#7-glosario-rápido)
+
+**Fase 4 — trabajo posterior**
+
+6. [Documentación interactiva con Swagger](#6-documentación-interactiva-con-swagger)
+   - 6.1 La interfaz · 6.2 Autenticación · 6.3 Grupos de endpoints
+   - 6.4–6.6 Ejecución real desde el navegador
+7. [CRUD administrativo completo](#7-crud-administrativo-completo)
+   - 7.1 Usuarios · 7.2 Organizaciones · 7.3 Centros de salud · 7.4 Rutas inexistentes
+8. [Hito 1 — Modelo de Paciente](#8-hito-1--modelo-de-paciente)
+   - 8.1 Autorregistro · 8.2 Duplicados · 8.3 Consulta · 8.4 Por qué no hay `PUT` ni `DELETE`
+9. [Hito 2 — Código Temporal de Atención (CTA)](#9-hito-2--código-temporal-de-atención-cta)
+   - 9.1 Decisión de diseño · 9.2 Parámetros · 9.3–9.4 Generación
+   - 9.5–9.6 Validación · 9.7 Fuerza bruta · 9.8 Pendiente
+10. [Estado actual de la base de datos](#10-estado-actual-de-la-base-de-datos)
+
+**Cierre**
+
+11. [Cumplimiento de la rúbrica](#11-cumplimiento-de-la-rúbrica)
+12. [Glosario rápido](#12-glosario-rápido)
 
 ---
 
@@ -43,9 +71,10 @@ Piénsalo como el cuaderno de bitácora de un examen práctico de manejo: no bas
 
 ### ¿Cómo se probó todo esto?
 
-Se usaron dos herramientas complementarias:
+Se usaron tres herramientas complementarias:
 
 - **[Postman](https://www.postman.com/):** una aplicación que permite enviar peticiones HTTP (como si fuera un navegador, pero más flexible) directamente a los endpoints de la API, sin necesidad de tener un frontend construido todavía.
+- **[Swagger UI](https://swagger.io/tools/swagger-ui/):** la documentación interactiva generada por el propio backend (sección 6), que permite leer y **ejecutar** cada endpoint desde el navegador. Las capturas de las secciones 6 a 9 provienen de aquí.
 - **[Tinker](https://laravel.com/docs/artisan#tinker):** una consola interactiva que trae Laravel, donde se pueden ejecutar comandos de PHP directamente contra la base de datos real del proyecto. Se usó puntualmente para **verificar** que lo que Postman mostraba en pantalla realmente había quedado guardado (y correctamente cifrado) en PostgreSQL.
 
 ### La arquitectura en una frase
@@ -115,7 +144,7 @@ El siguiente diagrama resume el flujo completo, de principio a fin, antes de ent
 
 ![Login exitoso en Postman](capturas/04_login_exitoso.png)
 
-**Resultado obtenido:** `200 OK` en `635 ms`. La respuesta incluye `"success": true` y dentro de `"data"`: el `token` de Sanctum (`6|VAG4zVj4Nzydvc0Qgwc34zFiNcV0UhL0KxcJxCXw222d2241`), el `tokenType: "Bearer"`, y los datos del usuario autenticado (`id`, `name: "Dr. Maternidad"`, `email`, `role: "medico"`, `isActive: true`).
+**Resultado obtenido:** `200 OK` en `635 ms`. La respuesta incluye `"success": true` y dentro de `"data"`: el `token` de Sanctum (cuyo valor se omite aquí por seguridad), el `tokenType: "Bearer"`, y los datos del usuario autenticado (`id`, `name: "Dr. Maternidad"`, `email`, `role: "medico"`, `isActive: true`).
 
 Esto confirma que el login **valida las credenciales de verdad** y entrega un token Bearer real de Sanctum, listo para usarse en los siguientes endpoints protegidos.
 
@@ -428,22 +457,587 @@ Esto confirma que la restricción de **multitenancy** no es solo una regla de ne
 
 ---
 
-## 6. Cumplimiento de la rúbrica
+## 6. Documentación interactiva con Swagger
+
+> 💡 **¿Qué problema resuelve esta sección?** Hasta aquí, cada endpoint se probó con Postman — una herramienta que vive en el computador de quien desarrolla. Pero el backend de SeñaVida no lo consume solo su autora: lo consume **el frontend**, construido en paralelo por otra persona. Sin una documentación viva, cada endpoint nuevo obligaría a escribir un mensaje explicando qué recibe, qué devuelve y con qué errores puede fallar.
+>
+> **Swagger (OpenAPI)** resuelve exactamente eso: genera una página web, a partir del propio código del backend, donde **cada endpoint se puede leer y ejecutar desde el navegador**. Es documentación que no se desactualiza, porque nace del código y no de un documento aparte.
+
+### 6.1 La interfaz generada
+
+> **URL:** `http://127.0.0.1:8000/api/documentation`
+> **Qué demuestra:** que la documentación OpenAPI 3.0 se genera correctamente y describe la API real del proyecto.
+
+![Portada de Swagger UI](capturas/27_swagger_portada.png)
+
+**Resultado obtenido:** la interfaz carga con el título **SenaVida API**, versión `1.0.0`, especificación **OAS 3.0**, y el servidor base correctamente apuntado a `http://127.0.0.1:8000/api/v1`. Debajo aparece el buscador por etiquetas y el primer grupo de endpoints.
+
+> **Detalle técnico:** esta página no se escribió a mano. Se genera con el paquete `darkaonline/l5-swagger` a partir de **atributos nativos de PHP 8** (`#[OA\Get(...)]`, `#[OA\Post(...)]`) escritos directamente sobre cada método de cada controlador. Al ejecutar `php artisan l5-swagger:generate`, el paquete recorre el código y produce el archivo `api-docs.json` que alimenta esta interfaz.
+
+### 6.2 Autenticación desde la propia documentación
+
+> **Qué demuestra:** que Swagger reconoce el esquema de seguridad Bearer y permite autenticarse para probar endpoints protegidos.
+
+![Modal de autorización de Swagger](capturas/28_swagger_authorize.png)
+
+**Resultado obtenido:** el botón **Authorize** abre el cuadro `Available authorizations`, con el esquema `bearerAuth (http, Bearer)` y la descripción *"Token Bearer obtenido en /auth/login"*.
+
+Al pegar aquí un token válido, **todas las peticiones posteriores lo incluyen automáticamente** en el header `Authorization`. Esto convierte a Swagger en un banco de pruebas completo: se puede recorrer la API entera sin salir del navegador ni configurar nada externo.
+
+### 6.3 Los cuatro grupos de endpoints
+
+Los endpoints están organizados por etiquetas (`tags`), que agrupan las operaciones por área funcional:
+
+**Autenticación:**
+
+![Grupo Autenticacion en Swagger](capturas/29_swagger_grupo_autenticacion.png)
+
+Tres operaciones: `POST /auth/login` (iniciar sesión), `GET /auth/me` (obtener usuario autenticado) y `POST /auth/logout` (cerrar sesión). Nótese el **candado** junto a los dos últimos: Swagger marca visualmente cuáles exigen token.
+
+**Catálogos:**
+
+![Grupo Catalogos en Swagger](capturas/30_swagger_grupo_catalogos.png)
+
+Las operaciones de lectura y creación sobre las tres entidades de la jerarquía institucional: `/health-centers`, `/organizations` y `/units`.
+
+**Usuarios:**
+
+![Grupo Usuarios en Swagger](capturas/31_swagger_grupo_usuarios.png)
+
+El registro de usuarios del personal de salud, `POST /users`, también protegido con token.
+
+### 6.4 Ejecución real desde Swagger — Autenticación
+
+Lo importante de Swagger no es que *describa* los endpoints, sino que permita **ejecutarlos de verdad**. Las siguientes capturas muestran el ciclo completo de autenticación corrido íntegramente desde el navegador.
+
+**Login:**
+
+![Login ejecutado desde Swagger](capturas/32_swagger_login_ejecutado.png)
+
+**Resultado obtenido:** `200 OK`. La respuesta entrega el `token` de Sanctum, el `tokenType: "Bearer"` y los datos del usuario `Super Admin` con rol `super_admin`.
+
+> 🔒 **Buena práctica aplicada:** el valor del token fue **cubierto intencionalmente** en todas las capturas de este informe antes de subirlas al repositorio público. Un token Bearer es una credencial activa: publicarlo equivale a publicar una contraseña. Este mismo criterio se aplicó antes al valor de `DB_PASSWORD` en la sección 2.1.
+
+**Usuario autenticado (`/auth/me`):**
+
+![GET /auth/me ejecutado desde Swagger](capturas/33_swagger_me_ejecutado.png)
+
+**Resultado obtenido:** `200 OK` devolviendo la identidad del usuario dueño del token — confirmando que el token pegado en `Authorize` viaja correctamente en cada petición.
+
+**Logout:**
+
+![Logout ejecutado desde Swagger](capturas/34_swagger_logout_ejecutado.png)
+
+**Resultado obtenido:** `200 OK` con `{"success": true}`. El token queda revocado en el servidor de inmediato.
+
+### 6.5 Ejecución real desde Swagger — Creación de catálogos
+
+Para verificar que Swagger no solo sirve para leer sino también para **escribir**, se recreó la jerarquía institucional completa desde la propia documentación:
+
+**Organización:**
+
+![Crear organización desde Swagger](capturas/35_swagger_crear_organizacion.png)
+
+`201 Created` — se creó `"Servicio de Salud Prueba Swagger"`.
+
+**Centro de salud:**
+
+![Crear centro de salud desde Swagger](capturas/36_swagger_crear_centro.png)
+
+`201 Created` — se creó `"Hospital Prueba Swagger"`, vinculado por `organizationId` a la organización anterior.
+
+**Unidad:**
+
+![Crear unidad desde Swagger](capturas/37_swagger_crear_unidad.png)
+
+`201 Created` — se creó `"Unidad Prueba Swagger"`, vinculada por `healthCenterId` al centro anterior.
+
+**Usuario:**
+
+![Crear usuario desde Swagger](capturas/38_swagger_crear_usuario.png)
+
+`201 Created` — se creó `"Usuario Prueba Swagger"` con rol `admision`, asociado a la organización, centro y unidad recién creados. La contraseña **no aparece en la respuesta**, ni en texto plano ni cifrada.
+
+> **Lo que demuestra esta secuencia:** los cuatro niveles del sistema (`Organización → Centro → Unidad → Usuario`) se pueden construir de punta a punta desde la documentación, respetando las relaciones entre ellos. Cada `id` devuelto alimenta la petición siguiente.
+
+### 6.6 Ejecución real desde Swagger — Listados
+
+**Organizaciones:**
+
+![Listar organizaciones desde Swagger](capturas/39_swagger_listar_organizaciones.png)
+
+**Centros de salud:**
+
+![Listar centros desde Swagger](capturas/40_swagger_listar_centros.png)
+
+`200 OK` con `"Hospital San Rafael"` y `"Hospital Santa Lucía"`, cada uno con su `organizationId`.
+
+**Unidades — sin filtro:**
+
+![Listar todas las unidades desde Swagger](capturas/41_swagger_listar_unidades.png)
+
+`200 OK` con las unidades de todos los centros: `Urgencia Adulto`, `Urgencia Infantil`, `Maternidad`, `Traumatología`.
+
+**Unidades — filtradas por centro (`?healthCenterId=`):**
+
+![Listar unidades filtradas desde Swagger](capturas/42_swagger_listar_unidades_filtro.png)
+
+`200 OK` devolviendo **únicamente** las tres unidades del Hospital San Rafael. El filtro por *query parameter* funciona correctamente, y Swagger lo documenta como parámetro opcional.
+
+---
+
+## 7. CRUD administrativo completo
+
+> 💡 **¿Qué falta cuando solo se puede crear y listar?** Las secciones anteriores demostraron que se pueden **crear** y **consultar** organizaciones, centros, unidades y usuarios. Pero un sistema real necesita también **corregir** datos mal cargados y **retirar de circulación** entidades que ya no operan. Esta sección documenta esas dos operaciones faltantes.
+>
+> Hay una decisión de diseño importante detrás: **SeñaVida nunca borra registros de verdad**. Al "eliminar" una entidad, lo que hace es marcarla como inactiva (`isActive: false`) — un patrón llamado **borrado lógico** (*soft delete*). En un sistema de salud esto no es opcional: un hospital dado de baja sigue teniendo atenciones históricas asociadas, y borrarlo físicamente destruiría trazabilidad clínica.
+
+### 7.1 CRUD de Usuarios
+
+**Listar todos los usuarios:**
+
+![Listado de usuarios](capturas/43_users_listar.png)
+
+`200 OK` con el listado completo, mostrando para cada usuario su `role` y su ubicación en la jerarquía (`organizationId`, `healthCenterId`, `unitId`). Nótese que el `super_admin` tiene los tres campos en `null`: no pertenece a ningún centro concreto porque su alcance es global.
+
+**Ver un usuario específico:**
+
+![Detalle de un usuario](capturas/44_users_ver.png)
+
+`200 OK` con la ficha completa del usuario `"Usuario Prueba Swagger"`, rol `admision`.
+
+**Editar un usuario:**
+
+![Edición de usuario](capturas/45_users_editar.png)
+
+`200 OK` — el `PUT` actualizó el nombre a `"Usuario Editado desde Swagger"`. La respuesta devuelve el registro ya modificado.
+
+**Desactivar un usuario:**
+
+![Desactivación de usuario](capturas/46_users_desactivar.png)
+
+`200 OK` con `{"id": ..., "isActive": false}`. El `DELETE` **no eliminó la fila**: cambió su estado.
+
+**Verificar la desactivación:**
+
+![Verificación del usuario desactivado](capturas/47_users_verificar_desactivado.png)
+
+`200 OK` — el registro **sigue existiendo y sigue siendo consultable**, ahora con `isActive: false`. Esta captura es la prueba directa de que el borrado es lógico y no físico: si hubiera sido un `DELETE` real, esta consulta habría devuelto `404`.
+
+### 7.2 CRUD de Organizaciones
+
+El mismo ciclo aplicado al nivel más alto de la jerarquía:
+
+**Listar:**
+
+![Listado de organizaciones](capturas/48_orgs_listar.png)
+
+`200 OK` con las dos organizaciones del sistema, ambas con `isActive: true`.
+
+**Ver una organización:**
+
+![Detalle de organización](capturas/49_orgs_ver.png)
+
+**Editar:**
+
+![Edición de organización](capturas/50_orgs_editar.png)
+
+`200 OK` — el nombre pasó a `"Servicio de Salud Metropolitano Editado"`.
+
+**Desactivar:**
+
+![Desactivación de organización](capturas/51_orgs_desactivar.png)
+
+`200 OK` con `isActive: false`.
+
+**Verificar:**
+
+![Verificación de organización desactivada](capturas/52_orgs_verificar_desactivado.png)
+
+`200 OK` — el registro persiste con su nombre editado y su estado inactivo.
+
+### 7.3 CRUD de Centros de Salud
+
+**Listar:**
+
+![Listado de centros de salud](capturas/53_centros_listar.png)
+
+`200 OK` con los tres centros del sistema y su estado.
+
+**Ver un centro:**
+
+![Detalle de centro de salud](capturas/54_centros_ver.png)
+
+`200 OK` con los datos del `"Hospital San Rafael"`. Debajo de la respuesta, Swagger muestra la **tabla de códigos documentados** para este endpoint: `200` (datos del centro), `401` (no autenticado), `403` (sin permiso) y `404` (centro no encontrado).
+
+> **Por qué importa esa tabla:** documentar los errores posibles es tan valioso como documentar el caso exitoso. El frontend necesita saber de antemano qué puede recibir para manejar cada caso sin adivinar.
+
+**Editar:**
+
+![Edición de centro de salud](capturas/55_centros_editar.png)
+
+`200 OK` — el nombre pasó a `"Hospital San Lupe Actualizado"`.
+
+**Desactivar:**
+
+![Desactivación de centro de salud](capturas/56_centros_desactivar.png)
+
+`200 OK` con `isActive: false`.
+
+**Verificar:**
+
+![Verificación de centro desactivado](capturas/57_centros_verificar_desactivado.png)
+
+`200 OK` — el centro sigue consultable, con su nombre editado y desactivado.
+
+### 7.4 Manejo de rutas inexistentes
+
+> **Qué demuestra:** cómo responde el framework cuando la ruta solicitada no está registrada.
+
+![Error 404 por ruta no encontrada](capturas/58_centros_404_no_encontrado.png)
+
+**Resultado obtenido:** `404 Not Found` con el mensaje `"The route api/v1/health-centers/{id} could not be found."` y la excepción `Symfony\Component\HttpKernel\Exception\NotFoundHttpException`.
+
+Esta captura se tomó **durante la construcción** del endpoint de detalle, antes de registrar la ruta — y conviene distinguir dos tipos de `404` que se ven parecidos pero significan cosas distintas:
+
+| Tipo | Significado | Cuándo ocurre |
+|---|---|---|
+| **Ruta no encontrada** | La URL no corresponde a ningún endpoint registrado | El endpoint no existe o está mal escrito |
+| **Recurso no encontrado** | El endpoint existe, pero el `id` solicitado no está en la base de datos | Se pide una entidad que no existe (o de otro centro, por aislamiento) |
+
+El primero es lo que muestra esta captura; el segundo es el `404` documentado en la tabla de la sección 7.3. La captura 54 confirma que, una vez registrada la ruta, el mismo `id` devuelve `200` correctamente.
+
+> ⚠️ **Nota de seguridad:** la respuesta incluye la traza completa del error con rutas absolutas del servidor (`C:\laragon\www\...`). Esto ocurre porque el entorno local tiene `APP_DEBUG=true`. **En producción, `APP_DEBUG` debe estar en `false`**, y Laravel entrega entonces un mensaje genérico sin exponer estructura interna ni rutas del sistema de archivos — información que un atacante podría aprovechar.
+
+---
+
+## 8. Hito 1 — Modelo de Paciente
+
+> 💡 **El cambio de perspectiva de esta sección.** Todo lo anterior gira en torno al **personal de salud**: usuarios que inician sesión, con roles y permisos. Aquí entra el otro protagonista del sistema, y funciona con reglas completamente distintas.
+>
+> El paciente de SeñaVida es una **persona sorda que llega a urgencias**. No tiene cuenta, no tiene contraseña, y probablemente está en una situación de estrés donde crear credenciales sería un obstáculo inaceptable. Por eso el registro del paciente es un **endpoint público**: cualquiera puede completarlo desde su propio teléfono, sin token, sin login.
+
+### 8.1 Autorregistro del paciente
+
+> **Endpoint:** `POST /api/v1/patients` — 🔓 **público, sin autenticación**
+> **Qué demuestra:** que un paciente puede registrarse por sí mismo, sin intervención de personal ni credenciales.
+
+![Autorregistro de paciente](capturas/59_paciente_autorregistro.png)
+
+**Resultado obtenido:** `201 Created`. Obsérvese en el comando `curl` que **no existe header `Authorization`** — la petición no lleva token de ningún tipo, y aun así el servidor la acepta.
+
+Los datos enviados incluyen identificación (`national_id`, `national_id_type`), fecha de nacimiento, previsión de salud, dirección, teléfono, CESFAM de origen, alergias, condiciones de salud y — el campo más importante para la misión del proyecto — la **preferencia de comunicación** (`texto`, `senas`, `mixto`).
+
+**Detalle destacable de la respuesta:**
+
+```json
+{
+  "id": "01a024de-7763-71df-8bb4-42495f3c999c",
+  "name": "Juan Soto",
+  "nationalId": "98765432-1",
+  "age": 36,
+  "communicationPreference": "texto",
+  "isActive": true
+}
+```
+
+El campo `age` **no se envió en la petición**. Se calcula en el servidor a partir de `birth_date` mediante un *accessor* del modelo que usa Carbon. Esto evita un problema clásico: si la edad se guardara como un número fijo, quedaría desactualizada al día siguiente del cumpleaños del paciente. Guardando la fecha de nacimiento y derivando la edad al momento de consultarla, el dato **siempre es correcto**.
+
+### 8.2 Control de duplicados
+
+> **Qué demuestra:** que el sistema impide registrar dos veces a la misma persona.
+
+![Registro de paciente duplicado rechazado](capturas/60_paciente_duplicado_422.png)
+
+**Resultado obtenido:** `422 Unprocessable Content` con el mensaje `"The national id has already been taken."`.
+
+La petición usó **el mismo `national_id`** (`98765432-1`) que el registro anterior, pero con un nombre distinto (`"Camila"`) y todos los demás datos cambiados. El servidor lo rechazó igualmente, porque la regla `unique` se aplica sobre el documento de identidad, no sobre el nombre.
+
+> **Por qué esto es crítico en un contexto clínico:** si el sistema permitiera dos fichas para la misma persona, un profesional podría abrir la ficha equivocada y no ver alergias o condiciones registradas en la otra. En urgencias, ese error puede tener consecuencias graves.
+
+### 8.3 Consulta de pacientes por el personal autorizado
+
+> **Endpoint:** `GET /api/v1/patients` — 🔒 requiere token
+> **Qué demuestra:** que el personal de salud autenticado puede consultar el listado de pacientes.
+
+![Listado de pacientes](capturas/61_pacientes_listar.png)
+
+**Resultado obtenido:** `200 OK` con los pacientes registrados, cada uno mostrando su edad calculada y su preferencia de comunicación. La petición se ejecutó con el token de un usuario de rol `admision`.
+
+### 8.4 Decisión de diseño — por qué no existe `PUT` ni `DELETE` sobre pacientes
+
+> Esta subsección no muestra una captura, sino que **explica una ausencia deliberada** en la documentación de Swagger.
+
+A diferencia de las demás entidades del sistema (`Organization`, `HealthCenter`, `Unit`, `User`), el modelo `Patient` **no expone rutas de edición ni de eliminación**. En la documentación de Swagger, el grupo *Pacientes* contiene únicamente tres operaciones:
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/patients` | Listar pacientes |
+| `POST` | `/patients` | Autorregistro de paciente |
+| `GET` | `/patients/{id}` | Ver un paciente |
+
+Esto **no es una omisión**: es una decisión de diseño definida en `PatientPolicy`, la clase que gobierna quién puede hacer qué sobre esta entidad. Los siete métodos estándar de la política (`viewAny`, `view`, `create`, `update`, `delete`, `restore`, `forceDelete`) devuelven `false` de forma **absoluta** para todos los roles del personal clínico — `admision`, `categorizacion`, `medico`, e incluso `admin_institucional` y `super_admin`.
+
+Dado que esa regla es incondicional, no se construyeron las rutas correspondientes. Exponer un endpoint `PUT /patients/{id}` que la política va a rechazar **siempre** solo añadiría código muerto y superficie de ataque innecesaria.
+
+> 💡 **El principio aplicado:** *no expongas una puerta que nunca vas a dejar abrir*. Es preferible no construir la ruta que construirla y bloquearla después con una capa de autorización — una puerta que existe puede fallar, una que no existe no.
+
+El contraste con el resto del sistema queda así:
+
+```mermaid
+flowchart LR
+    subgraph ADMIN["🏛️ Entidades administrativas"]
+        direction TB
+        A1["Organization<br/>HealthCenter<br/>Unit · User"]
+        A2["✅ Crear<br/>✅ Leer<br/>✅ Editar<br/>✅ Desactivar"]
+        A1 --- A2
+    end
+
+    subgraph PAC["🧏 Paciente"]
+        direction TB
+        B1["Patient"]
+        B2["🔓 Autorregistro público<br/>✅ Leer<br/>❌ Editar<br/>❌ Eliminar"]
+        B1 --- B2
+    end
+
+    style ADMIN fill:#ecfdf5,stroke:#0f766e,stroke-width:2px
+    style PAC fill:#fef2f2,stroke:#f87171,stroke-width:2px
+    style A2 fill:#ffffff,stroke:#0f766e
+    style B2 fill:#ffffff,stroke:#f87171
+```
+
+Lo que sí puede hacer el personal autorizado es **consultar**, como demuestra la sección 8.3. La ficha del paciente es, para el sistema, un dato que se lee pero no se altera desde el panel administrativo.
+
+---
+
+## 9. Hito 2 — Código Temporal de Atención (CTA)
+
+> 💡 **El problema que resuelve el CTA.** Un paciente sordo llega a urgencias y se acerca al mesón de Admisión. El funcionario necesita saber **quién es** para abrir su atención. Pero el paciente no puede decírselo hablando, y escribir su RUT en un papel es lento, propenso a errores y expone datos sensibles a la vista de la sala de espera.
+>
+> El **CTA** resuelve esto: el paciente genera en su propio teléfono un código corto (`SV-` + 6 dígitos), se lo muestra al funcionario, y ese código **revela la identidad del paciente** al sistema de Admisión.
+
+### 9.1 La decisión de diseño más importante del hito
+
+Antes de escribir una sola línea de código, el diseño original de este hito decía: *"Admisión genera el CTA para el paciente que tiene en pantalla, y luego lo valida"*. Ese planteamiento tenía una **contradicción lógica**:
+
+> Si Admisión necesita tener al paciente ya identificado en pantalla para generar su código, entonces el código **no cumple ninguna función real** — la identificación ya ocurrió antes, por otro medio.
+
+El diseño se corrigió al flujo inverso, que es el implementado:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor P as 🧏 Paciente
+    participant API as ⚙️ Backend SeñaVida
+    actor A as 🏥 Admisión
+
+    Note over P,API: Hito 1 — el paciente ya está registrado
+
+    P->>API: POST /patients/{id}/attention-codes
+    Note right of P: 🔓 Sin token — endpoint público
+    API-->>P: 201 · código SV-XXXXXX (una sola vez)
+
+    P->>A: Muestra el código en pantalla
+    Note over A: Admisión aún NO sabe quién es
+
+    A->>API: POST /attention-codes/validate { code }
+    Note left of A: 🔒 Requiere token de admisión
+    API-->>A: 200 · nombre + preferencia de comunicación
+
+    Note over A: Ahora sí conoce la identidad<br/>y cómo comunicarse
+```
+
+> **La lección de fondo:** el propósito de una credencial de identificación es **revelar** una identidad, no confirmarla. Si el sistema ya conoce la identidad antes de usar la credencial, la credencial está de más.
+
+### 9.2 Parámetros de seguridad implementados
+
+| Parámetro | Valor |
+|---|---|
+| Formato del código | `SV-` + 6 dígitos, comparación *case-insensitive* |
+| Vigencia | **60 minutos** desde su generación |
+| Reutilización | **Un solo uso** |
+| Códigos activos por paciente | **Máximo 1** — generar uno nuevo invalida el anterior |
+| Almacenamiento | **Nunca en claro**: se persiste su hash bcrypt |
+| Generación del número | `random_int()` — generador criptográficamente seguro |
+| Protección contra fuerza bruta | Límite de frecuencia por IP |
+
+### 9.3 Generación del código (T3)
+
+> **Endpoint:** `POST /api/v1/patients/{id}/attention-codes` — 🔓 **público, sin autenticación**
+> **Qué demuestra:** que el paciente genera su propio código sin necesitar credenciales.
+
+![Generación de código CTA](capturas/62_cta_generar.png)
+
+**Resultado obtenido:** `201 Created` con:
+
+```json
+{
+  "code": "SV-195348",
+  "expiresAt": "2026-08-24T20:28:29+00:00"
+}
+```
+
+La petición se ejecutó a las `19:28:29 GMT` y el código expira a las `20:28:29` — exactamente **60 minutos** después, confirmando la vigencia configurada. Igual que en el autorregistro, el comando `curl` **no incluye header `Authorization`**.
+
+> **El código en claro se devuelve una sola vez.** En la base de datos solo queda su hash bcrypt. Si el paciente pierde el código, no hay forma de recuperarlo — hay que generar uno nuevo. Es el mismo principio con el que se tratan las contraseñas.
+
+### 9.4 Un solo código activo por paciente
+
+> **Qué demuestra:** que generar un código nuevo invalida automáticamente el anterior.
+
+![Segunda generación de CTA](capturas/63_cta_generar_segundo_invalida_anterior.png)
+
+**Resultado obtenido:** `201 Created` con un código **distinto**, `SV-940557`, generado a las `19:29:38` — apenas un minuto después del anterior.
+
+Internamente, antes de insertar el registro nuevo, el sistema ejecuta:
+
+```sql
+UPDATE temporary_access_codes
+SET status = 'expired'
+WHERE patient_id = ? AND status = 'active'
+```
+
+El código `SV-195348` de la sección anterior quedó marcado como `expired` en ese instante, aunque su hora de expiración natural aún no había llegado.
+
+**Comprobación en la práctica:**
+
+![Validación de código ya invalidado](capturas/64_cta_validar_parametros.png)
+
+Al intentar validar `SV-195348` después de haber generado `SV-940557`, el sistema responde `422`. El rechazo **no ocurre porque el hash no coincida** — de hecho coincide perfectamente — sino porque el registro ya está en estado `expired`.
+
+> 💡 **Por qué existe esta regla:** si un paciente pudiera tener varios códigos vivos a la vez, un código antiguo olvidado en una captura de pantalla o mostrado a la persona equivocada seguiría siendo utilizable. Con un solo código activo, generar uno nuevo cancela cualquier riesgo anterior.
+
+### 9.5 Rechazo de código inválido
+
+> **Endpoint:** `POST /api/v1/attention-codes/validate` — 🔒 requiere token de `admision`
+> **Qué demuestra:** que un código inexistente es rechazado con un mensaje claro y sin filtrar información.
+
+![Validación de código inválido](capturas/65_cta_validar_invalido_422.png)
+
+**Resultado obtenido:** `422 Unprocessable Content` con el mensaje `"El codigo ingresado no es valido."`.
+
+Se envió `SV-000000`, un código que nunca existió. La respuesta es deliberadamente **genérica**: no revela si el código existió alguna vez, si expiró, o si pertenece a otro centro de salud. Cualquier detalle adicional sería información útil para alguien intentando adivinar códigos.
+
+Debajo, Swagger documenta los códigos posibles de este endpoint: `200` (código válido, devuelve datos mínimos del paciente), `401` (no autenticado), `403` (sin permiso o código bloqueado por intentos).
+
+### 9.6 Validación exitosa — el flujo completo ⭐
+
+> **Qué demuestra:** el ciclo completo del CTA funcionando de punta a punta. **Esta es la evidencia central del Hito 2.**
+
+**Paso 1 — el paciente genera su código:**
+
+![Generación del código para validar](capturas/66_cta_generar_para_validacion.png)
+
+`201 Created` con el código `SV-526302`, válido hasta las `21:15:34`. Petición **sin token**.
+
+**Paso 2 — Admisión valida el código:**
+
+![Validación exitosa del CTA](capturas/67_cta_validar_exitoso_200.png)
+
+**Resultado obtenido:** `200 OK` con:
+
+```json
+{
+  "accessId": "01a0356a-0157-72bf-a2a7-6ffa33a442be",
+  "patient": {
+    "id": "01a024de-7763-71df-8bb4-42495f3c999c",
+    "name": "Juan Soto",
+    "communicationPreference": "texto"
+  }
+}
+```
+
+**Aquí está el corazón del sistema.** El funcionario de Admisión escribió únicamente `{"code": "SV-526302"}` — no envió ningún `patient_id`, no seleccionó a nadie de una lista, no sabía de antemano quién era la persona frente a él. El sistema le **reveló** la identidad: se llama Juan Soto, y se comunica **por texto**.
+
+Ese último dato no es un detalle administrativo: le dice al funcionario, antes de intentar nada, **cómo comunicarse con esta persona**. Es exactamente el propósito para el que existe SeñaVida.
+
+> **Nota técnica sobre la validación sin `patient_id`.** Como el código se guarda con hash bcrypt, y bcrypt genera un hash distinto cada vez (por el *salt* aleatorio), **no se puede buscar directamente por hash** en la base de datos. La validación compara el código con `Hash::check()` contra los códigos `active` **del centro de salud del funcionario autenticado**. Ese acotamiento cumple, por construcción, la regla de aislamiento por centro: un funcionario del Hospital A no puede validar el código de un paciente que está en el Hospital B.
+
+### 9.7 Protección contra fuerza bruta
+
+> **Qué demuestra:** que el sistema bloquea intentos repetidos desde una misma IP.
+
+![Rate limiting activado en generación de CTA](capturas/68_cta_rate_limit_429.png)
+
+**Resultado obtenido:** `429 Too Many Requests` con el mensaje `"Demasiados intentos. Intenta de nuevo en 584 segundos."`.
+
+Tras varias generaciones consecutivas desde la misma dirección IP, el sistema cortó el acceso e indicó el tiempo exacto de espera restante.
+
+**Límites configurados:**
+
+| Endpoint | Límite |
+|---|---|
+| Generación de CTA | 5 intentos / 10 minutos por IP |
+| Validación de CTA | 5 intentos / 5 minutos por IP |
+
+> 💡 **Por qué la protección es por IP y no por contador en el registro.** El esquema incluye columnas `failed_attempts` y `max_attempts`, pero **no se incrementan por intento individual**. La razón es lógica: cuando alguien escribe un código que no coincide con ninguno, **no hay un registro específico al cual atribuir el fallo** — el sistema no sabe qué código "pretendía" escribir. Sumar el fallo a un registro arbitrario sería incorrecto.
+>
+> La protección se resolvió entonces en la capa adecuada: **límite de frecuencia por IP**, que cubre el mismo riesgo (adivinar códigos por fuerza bruta) sin necesitar identificar una víctima concreta. Un código de 6 dígitos tiene un millón de combinaciones; a 5 intentos cada 5 minutos, agotarlas tomaría más de 19 años — muy por encima de los 60 minutos de vigencia.
+
+### 9.8 Lo que queda pendiente para el próximo hito
+
+El contrato del proyecto define **tres** operaciones sobre el CTA. Dos están implementadas y documentadas arriba:
+
+| # | Operación | Estado |
+|---|---|---|
+| **T3** | Generar el código | ✅ Implementado |
+| **T1** | Validar el código | ✅ Implementado |
+| **T2** | **Consumir** el código y abrir la atención | ⏭️ Diferido al Hito 3 |
+
+**T2 se difirió deliberadamente**, no por falta de tiempo: la respuesta de ese endpoint *es* una **sesión médica** (`MedicalSession`), y ese modelo aún no existe. Construir el endpoint antes que el modelo que devuelve habría sido imposible. Se implementará junto con la entidad central del sistema, en el hito siguiente.
+
+> **Validar y consumir son operaciones distintas a propósito.** Validar responde *"¿quién es esta persona?"* y puede repetirse. Consumir responde *"abramos su atención"* y ocurre **una sola vez**, marcando el código como usado. Separarlas permite que Admisión confirme la identidad antes de comprometerse a abrir una atención.
+
+---
+
+## 10. Estado actual de la base de datos
+
+> **Qué demuestra:** que todas las tablas del sistema, incluidas las de los hitos nuevos, están efectivamente creadas en PostgreSQL.
+
+![Estado actualizado de las migraciones](capturas/69_migrate_status_actualizado.png)
+
+**Resultado obtenido:** las doce migraciones del proyecto figuran en estado **`Ran`**, sin ninguna pendiente ni fallida.
+
+La columna **Batch** cuenta por sí sola la historia del proyecto:
+
+| Batch | Migraciones | Corresponde a |
+|:---:|---|---|
+| **1** | `users`, `cache`, `jobs`, `personal_access_tokens`, `audit_logs`, `organizations`, `health_centers`, `units`, `add_foreign_keys_to_users_table` | Base de Laravel, Sanctum y módulo administrativo |
+| **2** | `patients`, `patient_contacts` | **Hito 1** — Modelo de Paciente |
+| **3** | `temporary_access_codes` | **Hito 2** — Código Temporal de Atención |
+
+> **Qué es un *batch*:** cada vez que se ejecuta `php artisan migrate`, Laravel agrupa bajo un mismo número todas las migraciones aplicadas en esa corrida. Esto permite deshacer un grupo completo con `migrate:rollback` sin afectar los anteriores — y, como efecto secundario útil, deja registrado el orden cronológico real en que se construyó el sistema.
+
+---
+
+## 11. Cumplimiento de la rúbrica
 
 Esta tabla resume cómo cada indicador de la rúbrica queda cubierto por las evidencias de este informe.
 
 | Indicador de la rúbrica | Puntos | Evidencia en este informe | Estado |
 |---|---|---|---|
-| **1.** Conexión BD + configuración en `.env` + modelos | 33 | Sección 2 (`.env`, `about`, `migrate:status`) + Sección 5.1–5.7 (creación y listado de catálogos) | ✅ |
-| **2.** Login + middleware de autenticación | 34 | Sección 3 (login, `/me`, logout, rate limiting) | ✅ |
+| **1.** Conexión BD + configuración en `.env` + modelos | 33 | Sección 2 (`.env`, `about`, `migrate:status`) + Sección 5.1–5.7 (creación y listado de catálogos) + Sección 10 (estado actualizado) | ✅ |
+| **2.** Login + middleware de autenticación | 34 | Sección 3 (login, `/me`, logout, rate limiting) + Sección 6.4 (ciclo completo desde Swagger) | ✅ |
 | **3.** Registro de usuario con cifrado de contraseña | 33 | Sección 4 (registro 201 + hash `$2y$12$` en Tinker + control de duplicados) | ✅ |
 | **TOTAL** | **100** | | ✅ |
 
-> **Evidencia adicional no exigida por la rúbrica:** las secciones 5.4 (control de roles/RBAC) y 5.8 (multitenancy) documentan capas de seguridad extra que refuerzan la solidez del sistema más allá de los tres indicadores mínimos.
+### Evidencia adicional no exigida por la rúbrica
+
+El trabajo documentado en este informe excede los tres indicadores mínimos. Las siguientes secciones documentan capas construidas después de la entrega base:
+
+| Sección | Aporte |
+|---|---|
+| **5.4** | Control de acceso basado en roles (RBAC) sobre el registro de usuarios |
+| **5.8** | Aislamiento por *multitenancy* entre centros de salud |
+| **6** | Documentación OpenAPI 3.0 interactiva, generada desde el código |
+| **7** | CRUD completo con borrado lógico y verificación de persistencia |
+| **8** | Modelo de Paciente con autorregistro público y edad derivada |
+| **9** | Código Temporal de Atención con hash, expiración, uso único y límite de frecuencia |
+| **10** | Verificación del esquema completo en PostgreSQL |
 
 ---
 
-## 7. Glosario rápido
+## 12. Glosario rápido
 
 Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluador que quiera repasar los términos técnicos):
 
@@ -453,15 +1047,24 @@ Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluado
 | **Endpoint** | Una "puerta" específica de la API — por ejemplo, `POST /api/v1/auth/login` es el endpoint del login |
 | **Token Bearer** | Una especie de carnet digital temporal que el servidor entrega al hacer login, y que hay que "mostrar" (enviar en el header `Authorization`) en cada petición siguiente para probar quién eres |
 | **Sanctum** | El paquete de Laravel que genera, valida y revoca esos tokens |
-| **Hash (bcrypt)** | El resultado de cifrar un texto de forma irreversible — no se puede "descifrar" de vuelta a la contraseña original, solo comparar si otro texto genera el mismo hash |
-| **Rate limiting** | Un límite de cuántas veces se puede intentar algo (como el login) en un período de tiempo, para frenar ataques de fuerza bruta |
-| **RBAC** (*Role-Based Access Control*) | Control de acceso basado en el rol del usuario: no todos los usuarios autenticados pueden hacer todo, algunas acciones están reservadas a ciertos roles |
-| **Multitenancy** | Que un mismo sistema sirva a varios "inquilinos" (en este caso, hospitales) manteniendo sus datos completamente separados entre sí |
-| **Migración** | Un archivo de código que describe cómo crear o modificar una tabla en la base de datos, de forma que el esquema completo se pueda reconstruir en cualquier máquina |
+| **Hash (bcrypt)** | El resultado de cifrar un texto de forma irreversible — no se puede "descifrar" de vuelta al original, solo comparar si otro texto genera el mismo hash |
+| **Salt** | Un valor aleatorio que bcrypt añade antes de cifrar, y que hace que el mismo texto produzca un hash distinto cada vez. Es lo que impide buscar directamente por hash en la base de datos |
+| **Rate limiting** | Un límite de cuántas veces se puede intentar algo en un período de tiempo, para frenar ataques de fuerza bruta |
+| **RBAC** (*Role-Based Access Control*) | Control de acceso basado en el rol del usuario: no todos los usuarios autenticados pueden hacer todo |
+| **Multitenancy** | Que un mismo sistema sirva a varios "inquilinos" (aquí, hospitales) manteniendo sus datos completamente separados entre sí |
+| **Migración** | Un archivo de código que describe cómo crear o modificar una tabla, de forma que el esquema completo se pueda reconstruir en cualquier máquina |
+| **Batch** (en migraciones) | El número de grupo bajo el que Laravel registra las migraciones aplicadas en una misma ejecución |
 | **Tinker** | La consola interactiva de Laravel para ejecutar código PHP directamente contra el proyecto y su base de datos |
+| **Swagger / OpenAPI** | Un estándar para describir APIs, y la interfaz web que permite leer y **ejecutar** esos endpoints desde el navegador |
+| **Policy** | Una clase de Laravel que concentra las reglas de "quién puede hacer qué" sobre una entidad, separadas del controlador |
+| **Borrado lógico** (*soft delete*) | Marcar un registro como inactivo en vez de eliminarlo físicamente, preservando el historial y las relaciones |
+| **Accessor** | Un método del modelo que calcula un valor al momento de leerlo, en vez de guardarlo en la base de datos — como la edad derivada de la fecha de nacimiento |
+| **CTA** | Código Temporal de Atención. Credencial intransferible y de un solo uso con la que un paciente se identifica ante Admisión |
+| **Sesión médica** | La atención clínica concreta de un paciente. **No** es lo mismo que la sesión de usuario del personal |
 
 ---
 
 <p align="center">
-  <sub>Informe de evidencias — Proyecto <strong>SeñaVida</strong> · Backend API REST · EVA2 · Instituto Profesional San Sebastián</sub>
+  <sub>Informe de evidencias — Proyecto <strong>SeñaVida</strong> · Backend API REST · Instituto Profesional San Sebastián</sub><br/>
+  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–10: Fase 4, Hitos 1 y 2</sub>
 </p>
