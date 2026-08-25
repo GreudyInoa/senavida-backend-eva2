@@ -1351,6 +1351,28 @@ Reglas obligatorias del backend para T1/T2:
 > una sesión médica y ese modelo no existe antes. Esto respeta además la
 > separación deliberada entre validar y consumir descrita en `RF-023`.
 
+> **✅ IMPLEMENTADO Y VERIFICADO (2026-08-24).**
+>
+> `TemporaryAccessCode` (migración, modelo, policy, controlador) construido con
+> T3 y T1. Verificado en ejecución, en este orden:
+>
+> 1. Generación sin token → `201`, código en claro devuelto una única vez.
+> 2. Segunda generación para el mismo paciente → `201` con código distinto, y el
+>    primero pasa a `expired` automáticamente (confirmado en base de datos: el
+>    hash antiguo sigue siendo válido vía `matchesCode()`, el rechazo posterior
+>    ocurre por `status`, no por el hash).
+> 3. Validación con el código ya expirado → `422` genérico.
+> 4. Validación con el código vigente → `200`, revela `patient.id`,
+>    `patient.name`, `patient.communicationPreference`.
+> 5. Sexto intento de generación en la ventana de frecuencia → `429` con
+>    segundos restantes.
+>
+> **Política de autorización no convencional.** `TemporaryAccessCodePolicy`
+> define `validateCode(User $user): bool` fuera de los siete métodos estándar
+> de Laravel, porque validar un CTA no corresponde a ninguna acción CRUD. Los
+> siete métodos estándar devuelven `false`: no existe gestión CRUD sobre esta
+> entidad.
+
 ### 6.4 M4 · Paciente
 
 | # | Método | Ruta | Origen | Notas |

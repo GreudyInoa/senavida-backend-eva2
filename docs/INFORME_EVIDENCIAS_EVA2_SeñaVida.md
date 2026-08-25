@@ -7,12 +7,12 @@
   <img src="https://img.shields.io/badge/Sanctum-Bearer%20Token-2E7D32?style=flat-square" alt="Sanctum"/>
   <img src="https://img.shields.io/badge/Swagger-OpenAPI%203.0-85EA2D?style=flat-square&logo=swagger&logoColor=black" alt="Swagger OpenAPI 3.0"/>
   <img src="https://img.shields.io/badge/Rúbrica-100%2F100-brightgreen?style=flat-square" alt="Rúbrica 100/100"/>
-  <img src="https://img.shields.io/badge/Fase%204-Hitos%201%20y%202-6E48AA?style=flat-square" alt="Fase 4 Hitos 1 y 2"/>
+  <img src="https://img.shields.io/badge/Fase%204-Hitos%201%2C%202%20y%203-6E48AA?style=flat-square" alt="Fase 4 Hitos 1, 2 y 3"/>
 </p>
 
 > Evidencia completa de funcionamiento del backend de **SeñaVida**, probada endpoint por endpoint con **Postman** y **Swagger UI**, y verificada a nivel de base de datos con **Tinker**. Este documento acompaña la entrega del **EVA2** y demuestra, con capturas reales (no simuladas), que el proyecto cumple cada indicador de la rúbrica.
 >
-> **Alcance ampliado.** Las secciones 1–5 corresponden a la entrega original del EVA2. Las secciones 6–10 documentan el trabajo posterior de la **Fase 4**: documentación interactiva con Swagger, CRUD administrativo completo, el **Hito 1** (modelo de Paciente) y el **Hito 2** (Código Temporal de Atención).
+> **Alcance ampliado.** Las secciones 1–5 corresponden a la entrega original del EVA2. Las secciones 6–13 documentan el trabajo posterior de la **Fase 4**: documentación interactiva con Swagger, CRUD administrativo completo, el **Hito 1** (modelo de Paciente), el **Hito 2** (Código Temporal de Atención) y el **Hito 3** (Sesión Médica, con manejo unificado de errores).
 
 | | |
 |---|---|
@@ -22,7 +22,7 @@
 | 🔗 **Repositorio** | [`GreudyInoa/senavida-backend-eva2`](https://github.com/GreudyInoa/senavida-backend-eva2) |
 | ⚙️ **Stack** | Laravel 13 · PHP 8.4 · PostgreSQL · Laravel Sanctum |
 | 📅 **Entrega EVA2** | 17 de agosto de 2026 |
-| 🔄 **Última actualización** | 24 de agosto de 2026 — Fase 4, Hitos 1 y 2 |
+| 🔄 **Última actualización** | 25 de agosto de 2026 — Fase 4, Hitos 1, 2 y 3 |
 
 ---
 
@@ -50,12 +50,20 @@
 9. [Hito 2 — Código Temporal de Atención (CTA)](#9-hito-2--código-temporal-de-atención-cta)
    - 9.1 Decisión de diseño · 9.2 Parámetros · 9.3–9.4 Generación
    - 9.5–9.6 Validación · 9.7 Fuerza bruta · 9.8 Pendiente
-10. [Estado actual de la base de datos](#10-estado-actual-de-la-base-de-datos)
+10. [Hito 3 — Sesión Médica](#10-hito-3--sesión-médica)
+    - 10.1 Decisiones de diseño (D-07, T2/S1) · 10.2 Recorrido por rol
+    - 10.3 S1 Abrir · 10.4 S3 Listar activas · 10.5 S4 Avanzar · 10.7 S5 Cerrar
+    - 10.6 Salto de emergencia (D-23) · 10.8 Hueco de seguridad · 10.9 Middleware
+11. [Manejo unificado de errores](#11-manejo-unificado-de-errores)
+    - 11.1 El problema · 11.2 Los 4 tipos de excepción
+    - 11.3 Código legible por máquina · 11.4 Corrección de seguridad
+12. [Estado actual de la base de datos](#12-estado-actual-de-la-base-de-datos)
+13. [Detalle técnico destacado del Hito 3](#13-detalle-técnico-destacado-del-hito-3)
 
 **Cierre**
 
-11. [Cumplimiento de la rúbrica](#11-cumplimiento-de-la-rúbrica)
-12. [Glosario rápido](#12-glosario-rápido)
+14. [Cumplimiento de la rúbrica](#14-cumplimiento-de-la-rúbrica)
+15. [Glosario rápido](#15-glosario-rápido)
 
 ---
 
@@ -986,13 +994,414 @@ El contrato del proyecto define **tres** operaciones sobre el CTA. Dos están im
 
 ---
 
-## 10. Estado actual de la base de datos
+## 10. Hito 3 — Sesión Médica
 
-> **Qué demuestra:** que todas las tablas del sistema, incluidas las de los hitos nuevos, están efectivamente creadas en PostgreSQL.
+> 💡 **La pieza que sostiene todo lo demás.** Hasta aquí, el sistema podía identificar a un paciente (Hito 1) y verificar su identidad ante Admisión mediante un código (Hito 2). Pero seguía faltando lo esencial: **la atención misma**. `MedicalSession` es la entidad de la que cuelga todo lo clínico — el chat, los signos vitales, la categorización, las notas médicas, los consentimientos. Sin ella, nada de eso tiene dónde existir.
+>
+> Este hito también cierra el pendiente que quedó explícito en la sección 9.8: el endpoint que **consume** el código de atención, imposible de construir antes porque su respuesta *era* una sesión médica.
 
-![Estado actualizado de las migraciones](capturas/69_migrate_status_actualizado.png)
+### 10.1 Dos decisiones de diseño resueltas antes de escribir código
 
-**Resultado obtenido:** las doce migraciones del proyecto figuran en estado **`Ran`**, sin ninguna pendiente ni fallida.
+Igual que en el Hito 2 —donde una pregunta a tiempo evitó construir un CTA inútil—, este hito comenzó resolviendo dos ambigüedades del contrato.
+
+**D-07 · El estado duplicado.** El prototipo del frontend guardaba el estado de la atención en **dos campos a la vez**: un `status` enumerado (`in_triage`) y un `currentStage` de texto libre (`"Categorización"`). Ambos decían lo mismo.
+
+> **El problema de duplicar la fuente de verdad.** Si un día alguien actualiza uno y olvida el otro, la sesión queda contradictoria: `status` dice que está en Categorización, `currentStage` dice que sigue en Admisión. ¿Cuál cree la interfaz? El error no es *si* ocurre, sino *cuándo*.
+
+**Resolución adoptada:** un único campo `status` con 6 valores canónicos. El texto en español **no se guarda: se calcula** al momento de servir la respuesta.
+
+```php
+// app/Enums/MedicalSessionStatus.php
+public function label(): string
+{
+    return match ($this) {
+        self::InAdmission   => 'Admisión',
+        self::InTriage      => 'Categorización',
+        self::InMedicalCare => 'Consulta Médica',
+        self::Closed        => 'Cerrado',
+        self::Cancelled     => 'Cancelada',
+        self::Expired       => 'Expirada',
+    };
+}
+```
+
+Verificado en Tinker antes de construir nada más:
+
+```php
+> \App\Enums\MedicalSessionStatus::InTriage->label();
+= "Categorización"
+```
+
+**T2 y S1 · Una duplicación en el propio contrato.** Revisando los endpoints definidos, se detectó que **dos rutas distintas hacían lo mismo**: `POST /attention-codes/{id}/consume` (T2) y `POST /medical-sessions` (S1), ambas creaban una sesión a partir de un código validado.
+
+**Resolución adoptada:** conservar solo S1. Consumir el código pasó a ser un **efecto interno** de abrir la atención, no un endpoint aparte. Fundamento: S1 acepta datos que T2 no contemplaba (motivo de consulta, alergias), y en REST, crear un recurso es `POST` sobre la colección de ese recurso — `POST /medical-sessions` *dice* lo que hace.
+
+### 10.2 El recorrido de una atención, por rol
+
+```
+in_admission ──(admisión)──> in_triage ──(categorización)──> in_medical_care ──(médico)──> closed
+```
+
+Cada flecha tiene **un solo dueño**. No basta con tener el rol correcto: hay que ser el dueño de *ese tramo específico*, y estar en la misma unidad.
+
+| Acción | Quién | Condición adicional |
+|---|---|---|
+| Abrir | `admision` | — |
+| Ver | `admision`, `categorizacion`, `medico` | Misma unidad |
+| Avanzar `in_admission → in_triage` | `admision` | Misma unidad |
+| Avanzar `in_triage → in_medical_care` | `categorizacion` | Misma unidad |
+| Cerrar | `medico` | Misma unidad **y** sesión en `in_medical_care` |
+
+> **El aislamiento es por unidad, no solo por hospital.** Un funcionario de Urgencia Infantil no puede operar sobre una atención de Urgencia Adulto, aunque ambas pertenezcan al mismo centro de salud.
+>
+> **`super_admin` y `admin_institucional` quedan excluidos por completo.** El contrato es explícito: *"El administrador gestiona la plataforma; no accede a información clínica de pacientes."*
+
+### 10.3 S1 · Abrir la atención
+
+> **Endpoint:** `POST /api/v1/medical-sessions` — 🔒 rol `admision`
+> **Qué demuestra:** que el CTA validado se consume y nace la atención.
+
+*(Captura pendiente: `70_s1_abrir_atencion.png`)*
+
+**Petición enviada:**
+
+```json
+{
+  "access_code_id": "01a0372d-cf65-7320-a1dd-bd92c68c3761",
+  "code": "SV-340860",
+  "reason_of_visit": "Control post-operatorio, dolor leve",
+  "allergies": []
+}
+```
+
+**Resultado obtenido:** `201 Created`.
+
+```json
+{
+  "id": "01a0372e-b3af-72ca-b30a-d4f8cbc35440",
+  "ctaCode": "SV-340860",
+  "status": "in_admission",
+  "statusLabel": "Admisión",
+  "isWritable": true,
+  "reasonOfVisit": "Control post-operatorio, dolor leve",
+  "patient": {
+    "name": "María Fernández",
+    "age": 41,
+    "communicationPreference": "senas",
+    "allergies": []
+  },
+  "healthCenterName": "Hospital San Rafael",
+  "unitName": "Urgencia Adulto",
+  "createdBy": { "name": "Enfermero Uno SR" }
+}
+```
+
+**Tres detalles que vale la pena señalar:**
+
+| Campo | Por qué importa |
+|---|---|
+| `ctaCode` | Cierra el `TODO` que el frontend arrastraba hardcodeado en `DashboardContainer.tsx:262`. El código se copia al abrir la atención — cuando **ya está consumido** y por tanto gastado, lo que hace aceptable persistirlo |
+| `statusLabel` | La etiqueta derivada del enum, nunca almacenada. D-07 resuelto en la práctica |
+| `isWritable` | Le dice al frontend si debe habilitar o deshabilitar los formularios, sin que tenga que repetir la lógica de estados |
+
+> **Todo dentro de una transacción.** Crear la sesión y marcar el código como `consumed` ocurren **juntos o ninguno**. Si algo falla a mitad de camino, PostgreSQL deshace ambos — el mismo mecanismo que se observó cuando una migración falló por incompatibilidad de tipos y no dejó tablas a medio construir.
+
+### 10.4 S3 · Listar las atenciones activas de la unidad
+
+> **Endpoint:** `GET /api/v1/medical-sessions/active` — 🔒 rol clínico
+> **Qué demuestra:** que el panel puede consultar todas las atenciones en curso de su unidad.
+
+*(Captura pendiente: `71_s3_listar_activas.png`)*
+
+**Resultado obtenido:** `200 OK` con un **array de dos sesiones** — Juan Soto y María Fernández, ambas en `Urgencia Adulto` del Hospital San Rafael, ordenadas por hora de inicio.
+
+> **Una corrección al contrato original.** El contrato describía *"la sesión activa"* en singular. Se implementó como **lista** porque una unidad de urgencias puede tener varios pacientes en curso simultáneamente. Devolver solo la más reciente habría **ocultado pacientes** del panel — un error silencioso y potencialmente grave. La captura confirma el caso real con dos atenciones abiertas a la vez.
+
+### 10.5 S4 · Avanzar de etapa
+
+*(Captura pendiente: `72_s4_avanzar_ok.png`)*
+
+**Resultado obtenido:** `200 OK`. Con el token de `admision`, la sesión pasó de `in_admission` a:
+
+```json
+{ "status": "in_triage", "statusLabel": "Categorización" }
+```
+
+**La prueba inversa — el mismo usuario, la etapa siguiente:**
+
+*(Captura pendiente: `73_s4_403_tramo_ajeno.png`)*
+
+**Resultado obtenido:** `403 Forbidden`. Con el **mismo token de `admision`**, intentar avanzar la sesión que ahora está en `in_triage` es rechazado: ese tramo le pertenece a `categorizacion`.
+
+**Y el bloqueo por unidad:**
+
+*(Captura pendiente: `74_s4_403_otra_unidad.png`)*
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "FORBIDDEN_CENTER",
+    "message": "Esta atencion pertenece a otra unidad."
+  }
+}
+```
+
+Un usuario de `categorizacion` de **Urgencia Infantil** no puede avanzar una atención de **Urgencia Adulto**, aunque ambos trabajen en el mismo hospital.
+
+### 10.6 D-23 · El salto de emergencia
+
+> **Qué problema resuelve.** El flujo normal obliga a pasar por las tres etapas en orden. Pero llega un paciente con un paro cardiorrespiratorio: no hay tiempo de esperar a Categorización. El contrato es explícito al respecto:
+>
+> *"El backend **DEBE** permitir el avance sin categorización previa... Existen situaciones de riesgo vital donde omitir la categorización formal es lo clínicamente correcto. Bloquearlo sería peligroso."*
+
+**Endpoint:** el mismo `PATCH /medical-sessions/{id}/stage`, con un modo especial en el body.
+
+*(Captura pendiente: `75_emergencia_salto.png`)*
+
+**Petición enviada:**
+
+```json
+{
+  "emergency": true,
+  "reason": "Paciente con dolor toracico intenso y disnea, sospecha de infarto agudo al miocardio."
+}
+```
+
+**Resultado obtenido:** `200 OK`, saltando directamente de `in_admission` a Consulta Médica:
+
+```json
+{
+  "status": "in_medical_care",
+  "statusLabel": "Consulta Médica",
+  "triageSkipped": true,
+  "triageSkipReason": "Paciente con dolor toracico intenso y disnea, sospecha de infarto agudo al miocardio.",
+  "triageSkippedBy": { "name": "Dr. Uno SR" }
+}
+```
+
+**Los controles aplicados — y los deliberadamente omitidos:**
+
+| Control | Decisión |
+|---|---|
+| Solo `medico` puede activarlo | ✅ Aplicado |
+| Motivo obligatorio, mínimo 30 caracteres | ✅ Aplicado |
+| Registro permanente de qué, por qué y quién | ✅ Aplicado (`triageSkipped`, `triageSkipReason`, `triageSkippedBy`) |
+| Validar clínicamente que sea "suficientemente grave" | ❌ **Descartado a propósito** |
+| Requerir aprobación de un segundo profesional | ❌ **Descartado a propósito** |
+
+> **Por qué se descartaron los dos últimos.** Un sistema de software **no puede verificar médicamente** si algo es una emergencia real — eso lo decide el criterio clínico del profesional en el momento. Una lista cerrada de diagnósticos permitidos sería imposible de mantener y daría falsa seguridad. Y cualquier paso adicional de aprobación introduce fricción **en el momento exacto donde la fricción mata**.
+>
+> **El principio aplicado:** el control no está en impedir el salto, sino en hacerlo **imposible de ocultar**. El mínimo de 30 caracteres existe justamente para eso: *"emergencia."* (11 caracteres) no sirve para auditar; el motivo del ejemplo sí.
+
+### 10.7 S5 · Cerrar la atención
+
+*(Captura pendiente: `76_s5_cierre_exitoso.png`)*
+
+**Resultado obtenido:** `200 OK`.
+
+```json
+{
+  "status": "closed",
+  "statusLabel": "Cerrado",
+  "isWritable": false,
+  "endedAt": "2026-08-25T20:44:23.000000Z",
+  "closureReason": "completed",
+  "summary": "Paciente estabilizado tras sospecha de IAM. Se deriva a unidad coronaria.",
+  "triageSkipped": true,
+  "triageSkipReason": "Paciente con dolor toracico intenso y disnea, sospecha de infarto agudo al miocardio.",
+  "closedBy": { "name": "Dr. Uno SR" }
+}
+```
+
+Obsérvese que **el registro de la emergencia sobrevive al cierre**: `triageSkipped` sigue en `true` con su motivo original, junto al resumen de egreso. Toda la historia de la atención queda en un solo lugar, auditable.
+
+### 10.8 Un hueco de seguridad encontrado durante las pruebas
+
+> **Cómo se descubrió.** Al probar S5 por primera vez, se intentó cerrar una atención que todavía estaba en `in_triage` — sin haber pasado nunca por Consulta Médica. El sistema **lo permitió**, devolviendo `200`.
+
+**Por qué era grave:** significaba que un médico podía cerrar la atención de un paciente **que nunca llegó a verse con él** — todavía en la sala de espera de Categorización. El resumen de egreso podría estar describiendo una consulta que jamás ocurrió.
+
+**La causa:** `close()` en la Policy validaba **rol** y **unidad**, pero no la **etapa**.
+
+**La corrección aplicada:**
+
+```php
+public function close(User $user, MedicalSession $session): Response
+{
+    if ($user->role !== 'medico') { ... }
+    if (! $this->mismaUnidad($user, $session)) { ... }
+
+    // La condición que faltaba:
+    if ($session->status !== MedicalSessionStatus::InMedicalCare) {
+        return Response::deny('INVALID_STAGE_TRANSITION|Esta atencion aun no ha llegado a Consulta Medica.');
+    }
+
+    return Response::allow();
+}
+```
+
+**Verificado tras la corrección**, sobre una sesión en `in_admission`:
+
+```php
+> $medico->can('close', $maria);
+= false
+```
+
+> 💡 **La lección.** El hueco no apareció leyendo el código, sino **probando un caso que no era el camino feliz**. Vale la pena diseñar las pruebas preguntando *"¿qué pasa si alguien hace esto fuera de orden?"*, no solo *"¿funciona cuando todo va bien?"*.
+
+### 10.9 Middleware `EnsureMedicalSessionIsActive`
+
+> **Qué problema resuelve.** El propio contrato marca como riesgo crítico: *"R4 — El cierre de sesión no bloquea escrituras"*. Sin esta pieza, nada impediría escribir signos vitales o notas clínicas sobre una atención ya cerrada.
+
+Un **middleware** es una capa que intercepta la petición **antes** de que llegue al controlador — el mismo mecanismo de `auth:sanctum`, pero para una regla de negocio propia.
+
+```
+Petición → auth:sanctum → session.active (¿está cerrada? corta aquí) → Controlador
+```
+
+*(Captura pendiente: `77_middleware_409_sesion_cerrada.png`)*
+
+**Resultado obtenido:** `409 Conflict` al intentar avanzar una sesión ya cerrada.
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "SESSION_ALREADY_CLOSED",
+    "message": "Esta atencion ya esta cerrada. No se permiten mas cambios."
+  }
+}
+```
+
+> **Por qué se construyó ahora, si ningún módulo clínico existe todavía.** Precisamente para que cuando se construyan (signos vitales, notas, chat), **no haya que copiar la validación en cada controlador**. Basta agregar `->middleware('session.active')` a la ruta. Un día alguien olvidaría copiar ese `if`, y ahí aparecería el hueco real.
+
+---
+
+## 11. Manejo unificado de errores
+
+> 💡 **Cómo surgió esta sección.** No estaba en el plan del hito. Al revisar una captura de error, se notó que la respuesta traía una traza de 40 líneas con rutas absolutas del servidor (`C:\laragon\www\...`), mientras que otros endpoints devolvían un JSON limpio. Dos formatos distintos para el mismo tipo de error, en la misma API.
+
+### 11.1 El problema
+
+**Formato limpio (endpoints del Hito 2):**
+
+```json
+{ "success": false, "error": { "message": "El codigo ingresado no es valido." } }
+```
+
+**Formato crudo (los `abort()` nuevos):**
+
+```json
+{
+  "message": "Esta atencion ya esta cerrada.",
+  "exception": "Symfony\\Component\\HttpKernel\\Exception\\HttpException",
+  "file": "C:\\laragon\\www\\senavida-backend-eva2\\vendor\\laravel\\...",
+  "line": 1447,
+  "trace": [ ... 40 líneas ... ]
+}
+```
+
+Dos problemas a la vez: **inconsistencia** (el frontend tendría que manejar dos formas de leer un error) y **exposición de estructura interna** del servidor.
+
+### 11.2 Los cuatro tipos de excepción que hubo que capturar
+
+La solución fue centralizar el manejo en `bootstrap/app.php`, sin tocar ningún controlador. Pero requirió entender que **cada tipo de problema lanza una clase distinta**:
+
+| Pregunta que responde | Excepción | HTTP |
+|---|---|:---:|
+| *¿Quién eres?* | `AuthenticationException` | 401 |
+| *¿Puedes hacer esto?* | `AccessDeniedHttpException` | 403 |
+| *¿Existe lo que pides?* | `NotFoundHttpException` | 404 |
+| *¿Tiene sentido ahora?* | `ApiException` (propia) | 403/409/410/422 |
+
+> ⚠️ **Un hallazgo que costó dos intentos: Laravel convierte excepciones en el camino.**
+>
+> El primer intento capturó `AuthorizationException` (la que lanza una Policy al rechazar) y `ModelNotFoundException` (la que lanza `findOrFail`). **Ninguna de las dos se ejecutó nunca.** El motivo: Laravel las transforma antes de que lleguen al handler.
+>
+> | Se lanza | Llega al handler como |
+> |---|---|
+> | `AuthorizationException` | `AccessDeniedHttpException` |
+> | `ModelNotFoundException` | `NotFoundHttpException` |
+>
+> Hay que capturar la **clase convertida**, no la original. Además, el orden importa: ambas convertidas **extienden de `HttpException`**, así que una regla genérica sobre `HttpException` colocada antes las absorbería a las dos. **Lo específico va antes que lo general.**
+
+### 11.3 El código de error legible por máquina
+
+El contrato es explícito en §18.2:
+
+> *"El frontend **DEBE** ramificar por [el `code`] y **NUNCA** por el texto de `message`."*
+
+La razón es práctica: el texto de un mensaje puede cambiar de redacción en cualquier momento; el identificador `SESSION_ALREADY_CLOSED` es un contrato estable.
+
+*(Captura pendiente: `78_error_con_code.png`)*
+
+**Resultado obtenido:**
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_STAGE_TRANSITION",
+    "message": "Esta atencion aun no ha llegado a Consulta Medica."
+  }
+}
+```
+
+**Cómo se implementó:**
+
+| Pieza | Rol |
+|---|---|
+| `App\Exceptions\ApiException` | Errores de negocio con código propio. Reemplaza a `abort()` |
+| `Response::deny('CODIGO\|mensaje')` en las Policies | Cada rechazo explica su motivo **y** su código |
+| Handler en `bootstrap/app.php` | Normaliza el formato de toda la API en un solo lugar |
+
+> **Efecto retroactivo.** Al centralizar el manejo, los `abort()` del Hito 2 (CTA) también quedaron con el formato limpio, **sin haber tocado ese controlador**. Un solo cambio arregló código escrito días antes.
+>
+> **Pendiente:** esos mismos endpoints del CTA todavía devuelven `message` sin `code`. El envoltorio ya es correcto; falta migrarlos de `abort()` a `ApiException` en una segunda pasada.
+
+### 11.4 Corrección de seguridad detectada durante el hito
+
+Al construir `MedicalSessionPolicy` se revisó `PatientPolicy` como referencia, y se encontró que **`super_admin` tenía acceso de lectura a las fichas de pacientes** — contradiciendo directamente la tabla de segregación de datos por rol del contrato, que le asigna `❌` en esa fila.
+
+```php
+// Antes — super_admin incluido:
+return in_array($user->role, ['admision', 'categorizacion', 'medico', 'super_admin']);
+
+// Después:
+return in_array($user->role, ['admision', 'categorizacion', 'medico']);
+```
+
+**Verificado en ejecución:**
+
+```php
+> $admin = \App\Models\User::where('role', 'super_admin')->first();
+> $patient = \App\Models\Patient::first();
+> $admin->can('view', $patient);
+= false
+```
+
+> **Cómo se coló originalmente.** Es un patrón común: durante el desarrollo se agrega `super_admin` a los permisos *"por si acaso, para poder probar todo sin trabas"*. Tiene sentido mientras se construye — el problema es que esa comodidad **queda fija en el código de producción**.
+
+---
+
+## 12. Estado actual de la base de datos
+
+> **Qué demuestra:** que todas las tablas del sistema, incluidas las de los tres hitos, están efectivamente creadas en PostgreSQL.
+
+*(Captura pendiente: `79_migrate_status_hito3.png`)*
+
+**Resultado obtenido:** las **dieciséis** migraciones del proyecto figuran en estado **`Ran`**, sin ninguna pendiente ni fallida.
+
+```
+  2026_08_21_045743_create_patients_table ..................................... [2] Ran
+  2026_08_21_045744_create_patient_contacts_table ............................. [2] Ran
+  2026_08_24_190328_create_temporary_access_codes_table ....................... [3] Ran
+  2026_08_25_000001_create_medical_sessions_table ............................. [4] Ran
+  2026_08_25_000002_add_consumed_status_to_temporary_access_codes_table ....... [4] Ran
+  2026_08_25_000003_add_cta_code_to_medical_sessions_table .................... [5] Ran
+  2026_08_25_000004_add_triage_skip_to_medical_sessions_table ................. [6] Ran
+```
 
 La columna **Batch** cuenta por sí sola la historia del proyecto:
 
@@ -1001,12 +1410,54 @@ La columna **Batch** cuenta por sí sola la historia del proyecto:
 | **1** | `users`, `cache`, `jobs`, `personal_access_tokens`, `audit_logs`, `organizations`, `health_centers`, `units`, `add_foreign_keys_to_users_table` | Base de Laravel, Sanctum y módulo administrativo |
 | **2** | `patients`, `patient_contacts` | **Hito 1** — Modelo de Paciente |
 | **3** | `temporary_access_codes` | **Hito 2** — Código Temporal de Atención |
+| **4** | `medical_sessions`, `add_consumed_status_to_temporary_access_codes` | **Hito 3** — Sesión Médica |
+| **5** | `add_cta_code_to_medical_sessions` | Hito 3 — exposición del `ctaCode` |
+| **6** | `add_triage_skip_to_medical_sessions` | Hito 3 — salto de emergencia (D-23) |
 
 > **Qué es un *batch*:** cada vez que se ejecuta `php artisan migrate`, Laravel agrupa bajo un mismo número todas las migraciones aplicadas en esa corrida. Esto permite deshacer un grupo completo con `migrate:rollback` sin afectar los anteriores — y, como efecto secundario útil, deja registrado el orden cronológico real en que se construyó el sistema.
 
+> **Los batches 5 y 6 cuentan una historia honesta.** No estaban planificados: surgieron de dos problemas encontrados **después** de dar por terminada la tabla principal. El batch 5 nació al notar que `ctaCode` —requisito explícito del contrato— no se estaba exponiendo. El batch 6, al detectar que el sistema no permitía el salto de emergencia que el propio contrato exige. Construir por partes y volver a revisar es normal; ocultarlo en una sola migración "limpia" habría sido menos fiel a lo que realmente pasó.
+
 ---
 
-## 11. Cumplimiento de la rúbrica
+## 13. Detalle técnico destacado del Hito 3
+
+### 13.1 Índice único parcial — «un paciente, una atención abierta»
+
+El contrato exige (RF-027) que un paciente no pueda tener dos atenciones abiertas simultáneamente. Un `unique()` normal de Laravel **no sirve**: diría *"este paciente aparece una sola vez en toda la tabla, para siempre"*, rompiendo el sistema en su segunda visita.
+
+La solución es una característica nativa de PostgreSQL:
+
+```sql
+CREATE UNIQUE INDEX medical_sessions_one_open_per_patient
+ON medical_sessions (patient_id)
+WHERE status NOT IN ('closed', 'cancelled', 'expired')
+```
+
+**Único, pero solo entre las filas que cumplen esa condición.** El mismo paciente puede tener muchas atenciones a lo largo del tiempo, pero nunca dos **abiertas** a la vez.
+
+> **Doble capa, a propósito.** El índice garantiza la integridad a nivel de base de datos; una verificación previa en el controlador devuelve un `409` con mensaje claro. Sin la segunda, el usuario vería un error `500` crudo de Postgres en vez de una explicación.
+
+### 13.2 Dos errores de implementación y qué enseñaron
+
+**UUID no es lo mismo que ULID.** La primera migración falló:
+
+```
+SQLSTATE[42804]: Datatype mismatch
+Key columns "patient_id" ... and "id" ... are of incompatible types: character and uuid.
+```
+
+Se había usado `$table->ulid()` donde el proyecto usa `uuid`. Se parecen a simple vista (ambos empiezan con `01a...`) pero PostgreSQL los tipa distinto.
+
+> **Un detalle tranquilizador:** las migraciones corren dentro de una **transacción**. Como falló a mitad de camino, PostgreSQL deshizo todo automáticamente — no quedó ninguna tabla a medias.
+
+**`$fillable` descarta campos en silencio.** Tras agregar la columna `cta_code`, la respuesta seguía devolviendo `"ctaCode": null` — sin ningún error.
+
+La causa: `$fillable` es una **lista blanca**. Eloquent solo acepta de un `create()` los campos declarados ahí; cualquier otro lo **descarta sin avisar**. Es una protección contra *mass assignment* (evitar que alguien cuele un campo inesperado desde un formulario), pero el costo es que un campo legítimo olvidado se pierde en silencio.
+
+---
+
+## 14. Cumplimiento de la rúbrica
 
 Esta tabla resume cómo cada indicador de la rúbrica queda cubierto por las evidencias de este informe.
 
@@ -1029,11 +1480,14 @@ El trabajo documentado en este informe excede los tres indicadores mínimos. Las
 | **7** | CRUD completo con borrado lógico y verificación de persistencia |
 | **8** | Modelo de Paciente con autorregistro público y edad derivada |
 | **9** | Código Temporal de Atención con hash, expiración, uso único y límite de frecuencia |
-| **10** | Verificación del esquema completo en PostgreSQL |
+| **10** | Modelo de Sesión Médica: 5 endpoints, Policy por rol/unidad/etapa, salto de emergencia auditado |
+| **11** | Manejo unificado de errores con código legible por máquina, y corrección de una brecha de acceso detectada |
+| **12** | Verificación del esquema completo en PostgreSQL |
+| **13** | Índice único parcial, transacciones y análisis de dos errores de implementación |
 
 ---
 
-## 12. Glosario rápido
+## 15. Glosario rápido
 
 Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluador que quiera repasar los términos técnicos):
 
@@ -1057,10 +1511,19 @@ Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluado
 | **Accessor** | Un método del modelo que calcula un valor al momento de leerlo, en vez de guardarlo en la base de datos — como la edad derivada de la fecha de nacimiento |
 | **CTA** | Código Temporal de Atención. Credencial intransferible y de un solo uso con la que un paciente se identifica ante Admisión |
 | **Sesión médica** | La atención clínica concreta de un paciente. **No** es lo mismo que la sesión de usuario del personal |
+| **Enum** (de PHP) | Una lista cerrada de valores posibles. Si escribes uno mal, el lenguaje avisa antes de ejecutar, en vez de fallar en producción |
+| **Índice único parcial** | Restricción de unicidad de PostgreSQL que solo aplica a las filas que cumplen una condición. Permite «un paciente, una atención **abierta**» sin bloquear sus visitas futuras |
+| **Transacción** | Un grupo de escrituras que ocurren **todas o ninguna**. Si algo falla a mitad, la base de datos deshace lo hecho |
+| **Middleware** | Capa que intercepta la petición **antes** del controlador. `auth:sanctum` es uno; `session.active` es otro, creado en este proyecto |
+| **Route Model Binding** | Función de Laravel que convierte el `{id}` de la URL directamente en el objeto ya cargado desde la base de datos |
+| **API Resource** | Capa que traduce el modelo (formato de base de datos) al JSON que espera el frontend: `camelCase`, campos calculados, relaciones resueltas |
+| **`$fillable`** | Lista blanca de campos que un modelo acepta al crear o actualizar. Protege contra *mass assignment*; el costo es que un campo olvidado se descarta en silencio |
+| **Salto de emergencia** | Omisión deliberada de la Categorización por riesgo vital. Solo `medico`, con motivo obligatorio y auditoría permanente |
+| **Código de error** (`code`) | Identificador fijo y legible por máquina que acompaña a cada error. El frontend ramifica por él, nunca por el texto del mensaje |
 
 ---
 
 <p align="center">
   <sub>Informe de evidencias — Proyecto <strong>SeñaVida</strong> · Backend API REST · Instituto Profesional San Sebastián</sub><br/>
-  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–10: Fase 4, Hitos 1 y 2</sub>
+  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4, Hitos 1, 2 y 3</sub>
 </p>

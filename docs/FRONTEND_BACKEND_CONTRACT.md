@@ -2,10 +2,37 @@
 
 **Proyecto:** SEÑAVIDA — Plataforma de comunicación inclusiva en salud
 **Documento:** Contrato oficial Frontend ↔ Backend
-**Versión del contrato:** `2.3.0` — arquitectura **API REST**
+**Versión del contrato:** `2.5.0` — arquitectura **API REST**
 **Estado:** Vigente. Decisiones de arquitectura ratificadas por el equipo y el docente (ver §Decisiones de arquitectura).
 **Fuente:** `BACKEND_IMPLEMENTATION_GUIDE.md` — auditoría del frontend en el commit `41360a8`
-**Fecha:** 2026-08-21 (actualizado v2.3.0)
+**Fecha:** 2026-08-25 (actualizado v2.5.0)
+
+> **Cambios en v2.5.0:**
+> - **E10 `MedicalSession` IMPLEMENTADO Y VERIFICADO.** Los cinco endpoints
+>   (S1–S5) construidos y probados en ejecución, con Policy por rol y unidad,
+>   middleware de sesión activa y códigos de error del catálogo de §18.2.
+> - **D-07 RESUELTO.** Un único campo `status` con 6 valores canónicos; la
+>   etiqueta en español se deriva al serializar, nunca se persiste.
+> - **D-23 RESUELTO.** Salto de emergencia implementado: `medico` puede omitir
+>   Categorización con motivo obligatorio (mín. 30 caracteres), auditado de
+>   forma permanente en la propia sesión.
+> - **T2 disuelto dentro de S1.** El consumo del CTA ocurre como efecto interno
+>   de abrir la atención. `ctaCode` expuesto — cierra el TODO de
+>   `DashboardContainer.tsx:262`.
+> - **Catálogo de `code` implementado** para autenticación, autorización, CTA y
+>   sesión médica (§18.2).
+> - **Corrección de seguridad en `PatientPolicy`:** `super_admin` tenía acceso
+>   de lectura a fichas de pacientes, contradiciendo la segregación por rol.
+>   Corregido y verificado.
+> - **R4 cerrado.** El middleware `EnsureMedicalSessionIsActive` impide toda
+>   escritura sobre una atención cerrada.
+
+> **Cambios en v2.4.0:**
+> - **E09 `TemporaryAccessCode` IMPLEMENTADO Y VERIFICADO.** Los dos endpoints
+>   del hito (generación pública, validación protegida) están construidos y
+>   probados en ejecución: invalidación automática del código anterior,
+>   comparación por hash acotada al centro del funcionario, límite de
+>   frecuencia en ambos endpoints. T2 (`consume`) queda diferido a §E10.
 
 > **Cambios en v2.3.0** (resolución de pendientes e implementaciones):
 > - **`cta.generate` RESUELTO (§E09, §12.2).** El CTA lo genera **el paciente**,
@@ -1393,23 +1420,126 @@ ContactMessage      (público, fuera del dominio clínico)
 > **texto**. Cualquier representación visual (código QR u otra) es
 > responsabilidad del frontend, que la construye a partir del texto recibido.
 
+> **✅ IMPLEMENTADO Y VERIFICADO (2026-08-24).**
+>
+> | Endpoint | Auth | Roles |
+> |---|---|---|
+> | `POST /patients/{id}/attention-codes` | 🔓 **Público** | El propio paciente |
+> | `POST /attention-codes/validate` | 🔒 | `admision`, `super_admin` |
+>
+> **`TemporaryAccessCodePolicy`** define `validateCode(User $user): bool`, un
+> método fuera de la convención estándar de Laravel (`view`/`create`/`update`),
+> justificado porque validar un CTA no corresponde a ninguna acción CRUD
+> tradicional. Los 7 métodos estándar de la Policy devuelven `false` sin
+> excepción: no existe gestión CRUD tradicional sobre esta entidad.
+>
+> **Generación.** `TemporaryAccessCode::generateCode()` usa `random_int()`
+> —generador criptográficamente seguro, no `rand()`— para producir el sufijo de
+> 6 dígitos. El hash se calcula con `Hash::make()` (bcrypt); el valor en claro
+> nunca se persiste.
+>
+> **Un código activo por paciente, verificado.** Al generar un CTA nuevo, se
+> ejecuta `UPDATE ... SET status='expired' WHERE patient_id=? AND status='active'`
+> antes de insertar el nuevo registro. Verificado en ejecución: un segundo
+> código para el mismo paciente invalida el primero, y `matchesCode()` sobre el
+> registro expirado sigue devolviendo `true` a nivel de hash —el rechazo ocurre
+> por `status`, no porque el hash cambie—.
+>
+> **Validación sin `patient_id`, resuelto con bcrypt + alcance por centro.** Se
+> compara el código contra los candidatos `status='active'` cuyo
+> `health_center_id` coincide con el del funcionario autenticado (`super_admin`
+> no se acota). La comparación es secuencial con `Hash::check()`, viable porque
+> el conjunto de códigos activos por centro es pequeño en cualquier momento dado.
+>
+> **Límite de frecuencia, no contador por registro.** `failed_attempts` y
+> `max_attempts` existen en el esquema pero no se incrementan por intento
+> individual: como la búsqueda no identifica un candidato "pretendido" cuando el
+> código no coincide con ninguno, no hay un registro específico al cual atribuir
+> el fallo. La protección contra fuerza bruta se implementa con límite de
+> frecuencia por IP en ambos endpoints (5 intentos / 10 min en generación, 5
+> intentos / 5 min en validación) — verificado: el sexto intento de generación
+> devuelve `429` con el tiempo de espera restante.
+>
+> **T2 (`consume`) diferido.** El endpoint que consume el código y crea la
+> `MedicalSession` no se construye en este hito, porque ese modelo aún no
+> existe. Se implementará junto con §E10.
+
 ---
 
-#### E10 · `MedicalSession` 🟦🟩
+#### E10 · `MedicalSession` 🟦🟩 ✅
 
 | Aspecto | Definición |
 |---|---|
 | **Descripción** | **Entidad central del sistema.** Una atención clínica concreta de un paciente en un establecimiento y unidad, con su ciclo de vida y todos sus artefactos asociados |
-| **Responsable** | `admision` la abre · `admision` y `categorizacion` la hacen avanzar · `medico` la cierra · el backend la expira |
-| **Relaciones** | `belongsTo` Patient, Organization, HealthCenter, Unit, User (apertura), User (cierre) · `hasMany` Consent, ChatMessage, VitalSigns, TriageRecord, ClinicalNote, PatientCall, InterpreterRequest, TimelineEvent |
+| **Responsable** | `admision` la abre · `admision` y `categorizacion` la hacen avanzar en su propio tramo · `medico` puede saltar Categorización en emergencia (D-23) y la cierra · el backend la expira |
+| **Relaciones** | `belongsTo` Patient, Organization, HealthCenter, Unit, User (apertura), User (cierre), User (autor del salto de emergencia) · `hasMany` Consent, ChatMessage, VitalSigns, TriageRecord, ClinicalNote, PatientCall, InterpreterRequest, TimelineEvent |
 
 > **Regla vinculante de integridad.** Ninguna entidad clínica puede existir sin
 > una sesión médica, y ninguna escritura se acepta si la sesión no está activa
-> (§11.3).
+> (§11.3). Enforced por el middleware `EnsureMedicalSessionIsActive`, aplicado a
+> toda ruta de escritura sobre `{medicalSession}`. **Cierra el riesgo R4.**
+
+> **✅ D-07 RESUELTO — IMPLEMENTADO Y VERIFICADO (2026-08-25).** Se eliminó la
+> duplicación `status`/`currentStage`. Existe un único campo `status`, con 6
+> valores canónicos (`in_admission`, `in_triage`, `in_medical_care`, `closed`,
+> `cancelled`, `expired`). La etiqueta en español (`statusLabel`) se **deriva**
+> al servir la respuesta —nunca se persiste— mediante un enum nativo de PHP
+> (`App\Enums\MedicalSessionStatus`).
 >
-> `DECISIÓN PENDIENTE — D-07`: el frontend mantiene **dos** representaciones de
-> estado —un estado enumerado y una etapa de texto libre— que codifican
-> información solapada. Debe unificarse en una sola máquina de estados.
+> `pending_consent` y `waiting_interpreter` (2 de los 9 valores que declara el
+> frontend) quedan **fuera del enum a propósito**: pertenecen a los módulos de
+> Consentimientos (E11) e Intérprete (E21), que no existen todavía. Se
+> incorporarán cuando se construyan esos módulos.
+
+> **✅ T2 disuelto dentro de S1 — IMPLEMENTADO Y VERIFICADO.** En vez de un
+> endpoint de consumo aparte, `POST /medical-sessions` recibe `access_code_id`
+> (el `accessId` que devuelve T1 al validar) más `code` (el texto plano,
+> verificado de nuevo contra el hash vía `matchesCode()`), y consume el CTA como
+> efecto interno de la creación, dentro de una transacción.
+>
+> **`ctaCode` expuesto.** El código en claro se copia a
+> `medical_sessions.cta_code` en el momento de abrir la atención —cuando ya está
+> consumido y por tanto gastado—, lo que hace aceptable persistirlo. Cierra el
+> requisito derivado de §E09 y el TODO de `DashboardContainer.tsx:262`.
+
+> **✅ D-23 RESUELTO — IMPLEMENTADO Y VERIFICADO.** El backend permite saltar
+> Categorización en una emergencia. `PATCH /medical-sessions/{id}/stage` con
+> `{"emergency": true, "reason": "..."}` (mínimo 30 caracteres) mueve la sesión
+> directo a `in_medical_care` desde `in_admission` o `in_triage`. **Solo
+> `medico`** puede activarlo.
+>
+> Queda auditado de forma permanente en la propia sesión: `triageSkipped`,
+> `triageSkipReason`, `triageSkippedBy`. **No existe validación clínica del
+> motivo** —el criterio de que sea una emergencia real recae en el profesional—;
+> el sistema garantiza que quede registrado y sea trazable, no que sea imposible
+> de activar. Se descartó exigir aprobación adicional: introducir fricción en el
+> momento exacto donde la fricción mata sería un diseño peligroso.
+
+> **Reglas de autorización por rol y por tramo — IMPLEMENTADO Y VERIFICADO:**
+>
+> | Acción | Quién | Condición adicional |
+> |---|---|---|
+> | Abrir (S1) | `admision` | — |
+> | Ver (S2, S3) | `admision`, `categorizacion`, `medico` | Misma unidad que la sesión |
+> | Avanzar `in_admission → in_triage` (S4) | `admision` | Misma unidad |
+> | Avanzar `in_triage → in_medical_care` (S4) | `categorizacion` | Misma unidad |
+> | Saltar a `in_medical_care` en emergencia (S4) | `medico` | Misma unidad, sesión aún no en `in_medical_care` ni cerrada |
+> | Cerrar (S5) | `medico` | Misma unidad, y la sesión **debe** estar en `in_medical_care` |
+>
+> **El aislamiento es por unidad, no solo por centro.** Un funcionario de
+> Urgencia Infantil no puede operar sobre una atención de Urgencia Adulto,
+> aunque ambas pertenezcan al mismo hospital.
+>
+> `super_admin` y `admin_institucional` quedan **excluidos por completo** de
+> esta entidad, ratificando la nota de §7.6.
+
+> **RF-027 — una atención abierta por paciente — IMPLEMENTADO.** Enforced en dos
+> capas: un índice único parcial de PostgreSQL
+> (`WHERE status NOT IN ('closed', 'cancelled', 'expired')`) a nivel de base de
+> datos, y una verificación previa en el controlador que devuelve `409` con
+> `code: PATIENT_HAS_ACTIVE_SESSION` antes de intentar el `INSERT`. La primera
+> capa garantiza integridad; la segunda, un mensaje claro en vez de un error de
+> Postgres.
 
 ---
 
@@ -1766,25 +1896,42 @@ roles lo pueden invocar.
 
 ### 7.6 Sesión médica
 
-| Endpoint | Método | Descripción | Auth | Roles |
-|---|---|---|:---:|---|
-| `/medical-sessions` | `POST` | Abre una atención | ✅ | ADI |
-| `/medical-sessions/{id}` | `GET` | Detalle de la atención | ✅ | ADI, CAT, MED |
-| `/medical-sessions/active` | `GET` | Atención activa del centro y unidad | ✅ | ADI, CAT, MED |
-| `/medical-sessions/{id}/stage` | `PATCH` | Avanza de etapa | ✅ | ADI, CAT |
-| `/medical-sessions/{id}/close` | `POST` | Cierra la atención | ✅ | MED |
-| `/medical-sessions/{id}/timeline` | `GET` | Línea de tiempo | ✅ | MED |
-| `/patient/session` | `GET` | Atención propia en curso | ✅ | PAC |
+| # | Endpoint | Método | Descripción | Auth | Roles | Estado |
+|---|---|---|---|:---:|---|:---:|
+| S1 | `/medical-sessions` | `POST` | Abre una atención consumiendo un CTA validado | ✅ | ADI | ✅ |
+| S2 | `/medical-sessions/{id}` | `GET` | Detalle de la atención | ✅ | ADI, CAT, MED (misma unidad) | ✅ |
+| S3 | `/medical-sessions/active` | `GET` | Atenciones activas del centro y unidad | ✅ | ADI, CAT, MED | ✅ |
+| S4 | `/medical-sessions/{id}/stage` | `PATCH` | Avanza de etapa. Con `emergency:true`, `MED` salta a Consulta Médica | ✅ | ADI y CAT (su tramo), MED (solo emergencia) | ✅ |
+| S5 | `/medical-sessions/{id}/close` | `POST` | Cierra la atención. Solo si ya está en `in_medical_care` | ✅ | MED | ✅ |
+| S6 | `/medical-sessions/{id}/timeline` | `GET` | Línea de tiempo | ✅ | MED | ⏭️ |
+| S7 | `/patient/session` | `GET` | Atención propia en curso | ✅ | PAC | ⏭️ |
+
+> **✅ S1–S5 IMPLEMENTADOS Y VERIFICADOS (2026-08-25),** con Policy por rol y
+> unidad, middleware de sesión activa, y códigos de error del catálogo de §18.2.
+>
+> **Pendientes:** S6 requiere el módulo de auditoría/eventos (E22); S7 requiere
+> resolver D-02 (autenticación del paciente).
+
+> **Nota sobre S3 — devuelve una lista, no un objeto único.** El contrato
+> original hablaba de *"la sesión activa"* en singular. Se implementó como lista
+> porque una unidad de urgencias puede tener varios pacientes en curso
+> simultáneamente. Verificado en ejecución con dos sesiones abiertas a la vez en
+> la misma unidad; devolver solo la más reciente habría ocultado pacientes del
+> panel.
 
 > **`admin_institucional` está deliberadamente ausente de toda esta sección.** El
 > borrador de autorización de la auditoría lo niega de forma explícita y la
 > interfaz de administración no recibe ningún dato clínico. El administrador
 > gestiona la plataforma; **no accede a información clínica de pacientes**.
+> Verificado también para `super_admin` (ver §12, nota de auditoría).
 >
 > `DECISIÓN PENDIENTE — D-16`: el borrador de autorización permite a
 > `categorizacion` cerrar atenciones, pero la interfaz solo ofrece ese control al
-> médico. Este contrato adopta **la versión restrictiva** (solo `MED`) hasta que
-> se ratifique lo contrario.
+> médico. Este contrato **ratifica la versión restrictiva** (solo `MED`), y así
+> está implementado. Fundamento: cerrar equivale a dar el alta —una decisión
+> clínica de un profesional de medicina—, es lo que el frontend real construyó,
+> y ampliar permisos después es más simple y seguro que restringirlos una vez en
+> producción. Queda abierta a ratificación docente.
 
 ### 7.7 Datos clínicos
 
@@ -2527,25 +2674,34 @@ Corresponden al frontend y se documentan para delimitar responsabilidades:
 admision → categorizacion → consulta_medica → cerrado
 ```
 
-| Regla | Categoría | Detalle |
-|---|---|---|
-| La atención se abre en `admision` | A | |
-| `admision` deriva a `categorizacion` | A | |
-| `categorizacion` deriva a `consulta_medica` | A | |
-| Solo `medico` cierra | A | Ver `D-16` |
-| Cada avance genera un mensaje de sistema | A | *«Paciente derivada a sala de {etapa}.»* |
-| No se retrocede de etapa | **D** | El frontend no lo impide |
-| No hay dos atenciones activas por paciente | **D** | El frontend no lo verifica |
-| Avanzar sin categorización | A (advertencia) | Avisa pero **permite avanzar** |
+| Regla | Categoría | Estado | Detalle |
+|---|---|:---:|---|
+| La atención se abre en `admision` | A | ✅ | S1, solo rol `admision` |
+| `admision` deriva a `categorizacion` | A | ✅ | S4, solo su propio tramo |
+| `categorizacion` deriva a `consulta_medica` | A | ✅ | S4, solo su propio tramo |
+| Solo `medico` cierra | A | ✅ | Ratificado, ver `D-16` en §7.6 |
+| Cada avance genera un mensaje de sistema | A | ⏭️ | Requiere E12 `ChatMessage` |
+| No se retrocede de etapa | **D** | ✅ | El enum solo expone `next()` hacia adelante |
+| No hay dos atenciones activas por paciente | **D** | ✅ | RF-027, doble capa (índice parcial + validación) |
+| Avanzar sin categorización | A (advertencia) | ✅ | Ver `D-23`, resuelto abajo |
 
-> **Regla vinculante sobre el último punto.** El backend **DEBE** permitir el
-> avance sin categorización previa, marcando la atención y auditando el hecho.
-> Existen situaciones de riesgo vital donde omitir la categorización formal es lo
-> clínicamente correcto. Bloquearlo sería peligroso. Ratificar en `D-23`.
+> **✅ `D-23` RESUELTO E IMPLEMENTADO.** El backend permite el avance sin
+> categorización previa, marcando la atención y auditando el hecho, tal como
+> exigía esta regla. Se implementó como un modo explícito del propio endpoint S4:
+> `{"emergency": true, "reason": "..."}`, restringido a `medico`, con motivo
+> obligatorio de al menos 30 caracteres, y registro permanente de qué se saltó,
+> por qué y quién lo autorizó (`triageSkipped`, `triageSkipReason`,
+> `triageSkippedBy`).
+>
+> El fundamento del contrato se mantiene íntegro: existen situaciones de riesgo
+> vital donde omitir la categorización formal es lo clínicamente correcto, y
+> bloquearlo sería peligroso. El control no está en impedirlo, sino en hacerlo
+> **imposible de ocultar**.
 
-**Estados** — categoría **A parcial**: el frontend declara nueve estados pero
-solo produce tres. El backend **DEBE** implementar la máquina completa o reducir
-el enum (`D-07`).
+**Estados** — ✅ **`D-07` RESUELTO.** El backend implementa un enum reducido de
+6 valores canónicos (§6 E10), descartando `pending_consent` y
+`waiting_interpreter` hasta que existan los módulos que los producen. La etapa
+de texto libre se eliminó: `statusLabel` se deriva del enum al serializar.
 
 ### 11.3 Cierre de la atención — categoría C 🔴
 
@@ -3293,6 +3449,37 @@ cambian con una versión mayor. El frontend **DEBE** ramificar por ellos y
 | `INTERNAL_ERROR` | 500 | Fallo no controlado |
 | `SERVICE_UNAVAILABLE` | 503 | Servicio o dependencia no disponible |
 
+> **✅ CATÁLOGO IMPLEMENTADO Y VERIFICADO (2026-08-25)** para autenticación,
+> autorización, código de atención y sesión médica. Toda respuesta de error de
+> esos módulos incluye ahora `code` además de `message`, como exige la regla
+> vinculante de arriba.
+>
+> **Cómo está construido:**
+>
+> | Pieza | Rol |
+> |---|---|
+> | `App\Exceptions\ApiException` | Errores de negocio con código propio. Reemplaza a `abort()` en los controladores |
+> | `Response::deny('CODIGO\|mensaje')` en las Policies | Cada rechazo de autorización explica su motivo y su código |
+> | Handler central en `bootstrap/app.php` | Normaliza el formato de toda la API en un solo lugar |
+>
+> **Lección de implementación — Laravel convierte excepciones en el camino.**
+> Un `render()` sobre la clase "de libro" no se ejecuta nunca si el framework ya
+> la reemplazó antes de llegar al handler. Verificado en ejecución:
+>
+> | Se lanza | Llega al handler como |
+> |---|---|
+> | `AuthorizationException` (Policy rechaza) | `AccessDeniedHttpException` |
+> | `ModelNotFoundException` (Route Model Binding falla) | `NotFoundHttpException` |
+>
+> Hay que capturar la **clase convertida**. Además, el orden importa: la regla
+> más específica debe ir antes que la genérica, porque `NotFoundHttpException` y
+> `AccessDeniedHttpException` ambas extienden de `HttpException` y serían
+> absorbidas por ella.
+>
+> **Pendiente de una segunda pasada:** los `abort()` del módulo E09 (CTA, Hito 2)
+> todavía no migraron a `ApiException`, por lo que devuelven `message` sin
+> `code`. El formato del envoltorio ya es correcto; solo falta el identificador.
+
 ### 18.3 Comportamiento esperado del frontend
 
 | `code` / HTTP | Acción |
@@ -3601,9 +3788,8 @@ contrato.
 
 ### 20.2 Bloqueantes 🔴
 
-| # | Decisión | Bloquea | Sección |
-|---|---|---|---|
-| **D-07** | **Unificación de la máquina de estados.** El frontend mantiene un estado enumerado de nueve valores —de los que solo produce tres— y una etapa de texto libre, que codifican información solapada | Modelo de la sesión médica, transiciones, validaciones de estado | §6, §11.2 |
+**No quedan decisiones bloqueantes.** `D-07`, la última pendiente, se resolvió
+en v2.5.0 (ver §20.7).
 
 > **Decisiones antes bloqueantes, ahora RESUELTAS (v2.0.0):**
 > - **D-01 — Base URL / arquitectura:** resuelta. API REST con base URL por
@@ -3624,9 +3810,8 @@ contrato.
 | **D-08** | ¿Título y descripción del consentimiento como texto almacenado o generado desde plantillas? | Contrato del recurso de consentimientos e internacionalización | §6 E11 |
 | **D-11** | Proveedor de videollamada | Integración de intérprete remoto | §6 E21 |
 | **D-12** | Consentimientos exigidos para cámara y videollamada | Reglas de negocio del intérprete | §6 E21 |
-| **D-16** | ¿Puede `categorizacion` cerrar atenciones? El borrador de autorización dice que sí; la interfaz solo lo ofrece al médico | Matriz de permisos. Este contrato adopta la versión restrictiva | §7.6 |
+| **D-16** | ¿Puede `categorizacion` cerrar atenciones? El borrador de autorización dice que sí; la interfaz solo lo ofrece al médico | **Ratificado en la versión restrictiva (solo `MED`) e implementado así.** Queda abierto a ratificación docente | §7.6 |
 | **D-20** | Rangos clínicos de presión arterial y frecuencia respiratoria | Validación de signos vitales. **Requiere criterio clínico, no técnico** | §8.5 |
-| **D-23** | ¿Se permite avanzar a consulta médica sin categorización? | Máquina de estados. Este contrato lo permite auditándolo | §11.2 |
 | **D-24** | Alcance del cifrado en reposo | Arquitectura de persistencia | §13.3 |
 | **D-25** | Política de retención de datos clínicos | Cumplimiento legal | §13.4 |
 | **D-26** | ¿El reconocimiento de señas se ejecuta en el cliente o en el servidor? | **Acoplado a una declaración pública** sobre procesamiento local | §13.4 |
@@ -3641,7 +3826,6 @@ contrato.
 | **D-10** | ¿Los síntomas de la categorización son lista cerrada o texto libre? | Interfaz de captura, hoy inexistente | §6 E18 |
 | **D-13** | ¿La línea de tiempo es entidad propia o proyección de la auditoría? | Modelo de eventos. Se recomienda la proyección | §6 E22 |
 | **D-14** | Ámbito de los parámetros de seguridad: global, por organización o por centro | Configuración | §6 E23 |
-| **D-15** | ¿Quién genera el código de atención? No existe pantalla que lo haga | Flujo de admisión | §7.4 |
 | **D-17** | Flujo de revocación posterior de consentimientos | Autonomía del paciente | §7.8 |
 | **D-18** | Formato definitivo del código: longitud, alfabeto, prefijo por establecimiento | Validación | §8.3 |
 | **D-19** | ¿El motivo de consulta pertenece al paciente o a la atención? | Modelo de datos | §8.4 |
@@ -3662,25 +3846,48 @@ contrato.
 ### 20.6 Ruta crítica
 
 ```
-D-02 (autenticación del paciente) ─┐
-                                   ├──► Modelo de identidad
-D-07 (máquina de estados)        ──┘         │
-                                             ▼
-                                   Sesión médica y datos clínicos
-                                             │
-                          ┌──────────────────┼──────────────────┐
-                          ▼                  ▼                  ▼
-                   D-06, D-16          D-08, D-17          D-20, D-23
-                  (autorización)      (consentimientos)      (clínicas)
+D-07 (máquina de estados)  ✅ RESUELTA E IMPLEMENTADA
+        │
+        ▼
+Sesión médica  ✅ IMPLEMENTADA (S1-S5 + middleware)
+        │
+   ┌────┴─────┬──────────────┬──────────────┐
+   ▼          ▼              ▼              ▼
+ D-06      D-08, D-17    D-20, D-10      E12 Chat
+(roles)   (consents)     (clínicas)      (mensajes)
+
+D-02 (auth del paciente)  ✅ DECIDIDA (A-03)  ·  ⏭️ NO IMPLEMENTADA
+        │
+        ▼
+Portal del paciente + S7 /patient/session
 ```
 
-**D-02 y D-07 bloquean el resto.** Ninguna otra decisión debería abordarse antes.
+**`D-07` ya no bloquea nada:** resuelta e implementada en v2.5.0. La sesión
+médica —raíz de todo el dominio clínico— está construida, por lo que los módulos
+que colgaban de ella (consentimientos, chat, signos vitales, categorización,
+notas) quedan desbloqueados.
+
+> **⚠️ Inconsistencia detectada en este documento (2026-08-25), pendiente de
+> limpieza.** `D-02` figura como **resuelta** en la nota de v2.0.0 de §20.2 —y
+> lo está: A-03 ratificó el mecanismo (Bearer token de Sanctum derivado del
+> CTA)—, pero varias secciones siguen marcándola como `DECISIÓN PENDIENTE`
+> (§6 E06, §7.6 sobre `/patient/access`, §13). Esas marcas quedaron sin
+> actualizar en v2.0.0.
+>
+> **La lectura correcta:** la decisión está tomada; lo que falta es
+> **construirla**. Conviene reemplazar esas marcas de `DECISIÓN PENDIENTE` por
+> `NO IMPLEMENTADO` en una pasada de limpieza, para no confundir «no sabemos qué
+> hacer» con «sabemos qué hacer y aún no lo hicimos».
 
 ### 20.7 Registro de decisiones resueltas
 
 | # | Decisión | Resolución | Sección |
 |---|---|---|---|
 | **D-00** | Nomenclatura del cable | **`camelCase`**, con conversión en la capa de serialización del backend | §2.3 |
+| **D-01** | URL base y arquitectura | **API REST** con base URL por `VITE_API_URL` y prefijo único `/api/v1` | §2.1, A-01 |
+| **D-07** | Unificación de la máquina de estados | **Un solo campo `status`** con 6 valores canónicos. La etiqueta en español se deriva al serializar (`statusLabel`), nunca se persiste. `pending_consent` y `waiting_interpreter` se difieren a sus módulos | §6 E10, §11.2 |
+| **D-15** | ¿Quién genera el código de atención? | **El paciente**, desde un endpoint público. El personal de salud no lo genera | §E09, §12.2 |
+| **D-23** | ¿Se permite avanzar a consulta médica sin categorización? | **Sí, en emergencia.** Solo `medico`, vía `PATCH .../stage` con `emergency:true` + `reason` (mín. 30 caracteres). Auditado permanentemente (`triageSkipped`, `triageSkipReason`, `triageSkippedBy`). Sin validación clínica del motivo: el criterio recae en el profesional, el sistema garantiza trazabilidad | §7.6, §6 E10, §11.2 |
 
 > Toda decisión que se resuelva **DEBE** trasladarse a esta tabla con su
 > fundamento, y retirarse de las listas de pendientes.
@@ -3701,6 +3908,10 @@ D-07 (máquina de estados)        ──┘         │
 | **Aislamiento por centro** | Separación estricta de datos entre establecimientos |
 | **Segregación por rol** | Recorte de campos de una respuesta según el perfil del solicitante |
 | **Efecto secundario** | Escritura que una operación produce en otro módulo |
+| **Salto de emergencia** | Omisión deliberada de la etapa de Categorización por riesgo vital. Solo `medico`, con motivo obligatorio y auditoría permanente (`D-23`) |
+| **Índice único parcial** | Restricción de unicidad de PostgreSQL que solo aplica a las filas que cumplen una condición. Permite «un paciente, una atención **abierta**» sin impedir sus visitas futuras |
+| **Enum canónico** | Lista cerrada de valores que es la única fuente de verdad de un estado. Las etiquetas visibles se derivan de él, nunca se almacenan por separado |
+| **Código de error** (`code`) | Identificador fijo y legible por máquina que acompaña a cada error. El frontend ramifica por él, nunca por el texto de `message` (§18.2) |
 
 ---
 

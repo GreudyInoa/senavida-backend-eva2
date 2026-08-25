@@ -625,6 +625,12 @@ Cada requerimiento se presenta así:
 > quiere mostrarlo como QR, lo arma ella misma a partir de ese texto — el backend
 > no genera imágenes.
 
+> **✅ LISTO (2026-08-24).** El paciente pide su código y el sistema se lo
+> muestra en pantalla. Si vuelve a pedir otro antes de usarlo, el código
+> anterior deja de servir automáticamente —comprobado creando dos códigos
+> seguidos para el mismo paciente—. No se puede pedir un código sin parar: pasado
+> cierto número de intentos desde el mismo lugar, el sistema pide esperar.
+
 ---
 
 **RF-021 · Guardar el código de forma segura**
@@ -641,6 +647,10 @@ Cada requerimiento se presenta así:
 > se compara con la guardada. Si coinciden, el código es correcto. Pero desde la
 > huella no se puede recuperar el código original.
 
+> **✅ LISTO (2026-08-24).** Se usa la misma técnica que ya protege las
+> contraseñas del personal. En ningún momento el código queda guardado tal cual
+> se escribió.
+
 ---
 
 **RF-022 · Validar el código que escribe el funcionario**
@@ -654,6 +664,12 @@ Cada requerimiento se presenta así:
 
 > ⚠️ **Situación actual:** el frontend compara el código escrito con el texto
 > `SV-847291`, que está fijo en el código. Cualquier otro código se rechaza.
+
+> **✅ LISTO (2026-08-24).** El funcionario escribe el código sin saber todavía
+> de quién es —esa es justamente la gracia: el código se lo dice—. El sistema
+> revisa que exista, que no haya vencido y que no esté bloqueado, y solo entre
+> los códigos de **su propio hospital**. Si es válido, muestra los datos básicos
+> del paciente.
 
 ---
 
@@ -671,6 +687,10 @@ Cada requerimiento se presenta así:
 > funcionario revisa la ficha en pantalla y confirma que la persona que tiene
 > delante es realmente esa. No conviene juntarlos.
 
+> ⏳ **Pendiente.** Este paso —consumir el código y abrir la atención— se hace
+> junto con la sesión médica, que es lo siguiente que se construye. No se hizo
+> antes porque no existía todavía dónde «abrir» la atención.
+
 ---
 
 **RF-024 · Bloquear códigos tras varios intentos fallidos**
@@ -681,6 +701,13 @@ Cada requerimiento se presenta así:
 | **Prioridad** | 🟠 Media |
 | **Necesita** | RF-022, RF-051 |
 | **Resultado esperado** | Tras el número configurado de fallos, el código deja de funcionar aunque después se escriba bien. |
+
+> **🔵 Resuelto de otra forma.** No se cuentan los errores código por código,
+> porque cuando alguien escribe un código que no le pertenece a nadie, el
+> sistema no tiene forma de saber «a cuál código apuntaba» ese error. En cambio,
+> se limita cuántas veces se puede intentar validar un código **desde el mismo
+> lugar** en pocos minutos — comprobado: al sexto intento seguido, el sistema
+> pide esperar.
 
 ---
 
@@ -1448,8 +1475,8 @@ Cada requerimiento se presenta así:
 | B · Gestión de usuarios | ✅ **Listo** | Crear, ver, editar, desactivar y reactivar. Con separación por centro de salud |
 | C · Listas fijas | ✅ **Listo** | Organizaciones, centros y unidades, todos con gestión completa |
 | D · Pacientes | 🔵 **Casi listo** | Ficha y contactos funcionando. Falta que el paciente pueda agregar contactos |
-| E · Código de atención | 🔨 **En construcción** | Decisiones tomadas y documentadas; código en desarrollo |
-| F · Sesiones médicas | ⏳ Pendiente | Es lo siguiente después del código de atención |
+| E · Código de atención | 🔵 **Casi listo** | Generar y validar, funcionando y probados. Falta consumir el código (se hace junto con F) |
+| F · Sesiones médicas | ⏳ Pendiente | Es lo siguiente |
 | G a O | ⏳ Pendiente | — |
 
 **Además, sin estar en la lista original:**
