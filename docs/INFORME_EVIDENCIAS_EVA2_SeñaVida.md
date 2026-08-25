@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="capturas/00_portada.png" alt="SeñaVida — comunicación accesible en urgencias" width="100%"/>
-</p>
-
 # 🩺 Informe de Evidencias — Backend SeñaVida
 
 <p align="center">
