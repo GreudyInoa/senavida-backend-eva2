@@ -7,12 +7,13 @@ use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[ObservedBy([AuditLogObserver::class])]
 class Patient extends Model
 {
-    use HasUuids;
+    use HasApiTokens, HasUuids;
 
     protected $fillable = [
         'name',

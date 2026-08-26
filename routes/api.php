@@ -1,5 +1,5 @@
 <?php
-
+use App\Http\Controllers\Api\V1\Auth\PatientAccessController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\HealthCenterController;
 use App\Http\Controllers\Api\V1\MedicalSessionController;
@@ -10,13 +10,19 @@ use App\Http\Controllers\Api\V1\UnitController;
 use App\Http\Controllers\Api\V1\UserController;
 use Illuminate\Support\Facades\Route;
 
-
 Route::prefix('v1')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login']);
     Route::post('/patients', [PatientController::class, 'store']);
     Route::post('/patients/{patient}/attention-codes', [TemporaryAccessCodeController::class, 'store']);
 
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/auth/patient/redeem', [PatientAccessController::class, 'redeem'])
+        ->middleware('throttle:5,1');
+
+    Route::post('/auth/patient/logout', [PatientAccessController::class, 'logout'])
+        ->middleware(['auth:sanctum', 'patient.only']);
+
+    Route::middleware(['auth:sanctum', 'staff.only'])->group(function () {
+
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
 
@@ -50,7 +56,6 @@ Route::prefix('v1')->group(function () {
 
         Route::get('/patients', [PatientController::class, 'index']);
         Route::get('/patients/{patient}', [PatientController::class, 'show']);
-
         Route::post('/attention-codes/validate', [TemporaryAccessCodeController::class, 'validateCode']);
 
         Route::post('/medical-sessions', [MedicalSessionController::class, 'store']);
@@ -58,7 +63,6 @@ Route::prefix('v1')->group(function () {
         Route::get('/medical-sessions/{medicalSession}', [MedicalSessionController::class, 'show']);
         Route::patch('/medical-sessions/{medicalSession}/stage', [MedicalSessionController::class, 'advance'])
             ->middleware('session.active');
-
         Route::post('/medical-sessions/{medicalSession}/close', [MedicalSessionController::class, 'close'])
             ->middleware('session.active');
     });

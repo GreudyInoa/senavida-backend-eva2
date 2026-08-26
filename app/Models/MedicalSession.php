@@ -90,5 +90,8 @@ class MedicalSession extends Model
             'summary' => $summary,
             'closed_by' => $closedBy->id,
         ]);
+
+        // El acceso del paciente termina con la atencion (S8.7, S11.3).
+        $this->patient->tokens()->delete();
     }
 }

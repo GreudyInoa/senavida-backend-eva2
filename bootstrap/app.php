@@ -25,6 +25,8 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'session.active' => \App\Http\Middleware\EnsureMedicalSessionIsActive::class,
+            'patient.only'   => \App\Http\Middleware\EnsurePatientToken::class,
+            'staff.only'     => \App\Http\Middleware\EnsureStaffToken::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -41,14 +43,7 @@ return Application::configure(basePath: dirname(__DIR__))
             }
         });
 
-        /**
-         * Laravel convierte AuthorizationException en
-         * AccessDeniedHttpException ANTES de que la veamos --
-         * el mismo patron que ModelNotFoundException ->
-         * NotFoundHttpException. Por eso capturamos la version
-         * convertida, no la original. Las Policies mandan
-         * "CODIGO|mensaje", lo partimos aqui.
-         */
+        
         $exceptions->render(function (AccessDeniedHttpException $e, Request $request) {
             if ($request->is('api/*')) {
                 $partes = explode('|', $e->getMessage(), 2);
@@ -64,9 +59,7 @@ return Application::configure(basePath: dirname(__DIR__))
             }
         });
 
-        // Se mantiene por si algun contexto (ej. un comando de
-        // consola) lanza AuthorizationException sin pasar por el
-        // ciclo HTTP normal de conversion.
+        
         $exceptions->render(function (AuthorizationException $e, Request $request) {
             if ($request->is('api/*')) {
                 $partes = explode('|', $e->getMessage(), 2);
