@@ -62,10 +62,16 @@
 13. [Detalle técnico destacado del Hito 3](#13-detalle-técnico-destacado-del-hito-3)
     - 13.1 Índice único parcial · 13.2 Errores de implementación · 13.3 **Cierre de Fase 4**
 
+**Fase 5 — en curso**
+
+14. [Fase 5 — Chat y Consentimientos (en curso)](#14-fase-5--chat-y-consentimientos-en-curso)
+    - 14.1 Hito 5.0 — Acceso del paciente (token derivado del CTA)
+    - 14.2 Hito 5.1 — Catálogo de Pictogramas · 14.3 Estado de la fase
+
 **Cierre**
 
-14. [Cumplimiento de la rúbrica](#14-cumplimiento-de-la-rúbrica)
-15. [Glosario rápido](#15-glosario-rápido)
+15. [Cumplimiento de la rúbrica](#15-cumplimiento-de-la-rúbrica)
+16. [Glosario rápido](#16-glosario-rápido)
 
 ---
 
@@ -1557,11 +1563,88 @@ La causa: `$fillable` es una **lista blanca**. Eloquent solo acepta de un `creat
 | 3 | Sesión Médica — 5 endpoints, Policy por rol/unidad/etapa, salto de emergencia | ✅ |
 | 4 | Middleware de sesión activa | ✅ |
 
-**Fase 4 — Paciente, CTA y Sesión Médica — completa.** Los cuatro hitos definidos en el mapa del proyecto están construidos, probados en ejecución y documentados. La siguiente etapa es **Fase 5 — Chat y Consentimientos**, que el propio contrato describe como *"el núcleo del producto"*.
+**Fase 4 — Paciente, CTA y Sesión Médica — completa.** Los cuatro hitos definidos en el mapa del proyecto están construidos, probados en ejecución y documentados. La siguiente etapa, **Fase 5 — Chat y Consentimientos** —que el propio contrato describe como *"el núcleo del producto"*— ya está en curso; ver sección 14.
 
 ---
 
-## 14. Cumplimiento de la rúbrica
+## 14. Fase 5 — Chat y Consentimientos (en curso)
+
+> 💡 **El núcleo comunicacional del producto.** Esta fase construye el canal de mensajes de la atención (chat) y el sistema de permisos del paciente (consentimientos). Antes de tocar esas dos entidades, fue necesario resolver dos prerrequisitos que el propio contrato dejaba pendientes: **cómo se autentica un paciente** (A-03, decidido pero no implementado) y **de dónde salen los pictogramas** que el chat va a usar.
+
+### 14.1 Hito 5.0 — Acceso del paciente (token derivado del CTA)
+
+**El problema.** Hasta este hito, el paciente no tenía ninguna forma de probar su identidad ante la API. Cuatro endpoints de esta fase son exclusivos del paciente (aprobar, rechazar y revocar un consentimiento, y confirmar un mensaje) — sin autenticación, ninguno se podía siquiera construir con seguridad.
+
+**Decisión de diseño resuelta antes de escribir código.** El contrato original decía que el canje del código (CTA) debía validar que el código "no estuviera usado". Pero en el Hito 3 (Fase 4) se decidió que el endpoint de consumo del código (T2) se disolvió dentro de la apertura de la atención (S1): al abrir la atención, Admisión **ya consume** el código.
+
+> **El problema de validar "no usado".** Si el redeem del paciente buscara un código sin usar, nunca lo encontraría — el código ya quedó marcado `consumed` en el paso anterior. El paciente jamás podría entrar a su propia conversación.
+
+**Resolución adoptada:** el redeem no valida contra la tabla del código original, sino contra `medical_sessions.cta_code`, exigiendo que la atención siga abierta. El código, que ya cumplió su función de "abrir la puerta", pasa a significar "esta es mi conversación actual" — y la vigencia queda resuelta gratis: si la atención se cierra, el acceso del paciente muere con ella.
+
+**La solución técnica: token acotado a una sola atención.**
+
+```php
+$patient->createToken('patient-portal', ["session:{$session->id}"]);
+```
+
+Un token de Sanctum grabado con una *ability* específica — no abre todo el sistema, solo la atención a la que pertenece. Se verificó en Tinker el ciclo completo:
+
+```
+> $patient->createToken('patient-portal', [...]);
+= Laravel\Sanctum\NewAccessToken { tokenable_type: "App\Models\Patient", ... }
+
+> $patient->tokens()->count();
+= 1
+
+> $session->closeSession('completed', 'Resumen de prueba...', $user);
+> $patient->tokens()->count();
+= 0
+```
+
+El token murió automáticamente al cerrar la atención, confirmando la regla del contrato de que el acceso del paciente termina con la atención misma.
+
+**Segregación de identidad.** Con Sanctum, `$request->user()` ahora puede devolver un `Patient` o un `User`, dependiendo del token. Se construyeron dos middlewares — `EnsurePatientToken` y `EnsureStaffToken` — que actúan **antes** de cualquier Policy, evitando que un `Patient` reviente una Policy escrita pensando en `$user->role`.
+
+### 14.2 Hito 5.1 — Catálogo de Pictogramas
+
+**El problema.** El chat necesita referenciar pictogramas mediante una clave foránea real, no una columna huérfana. Además, el prototipo original tenía dos defectos que el contrato señala explícitamente: el símbolo de cada pictograma vivía en un `switch` de código (cualquier pictograma nuevo aparecía con un ícono genérico), y el color se guardaba como clases de Tailwind crudas en la base de datos — acoplamiento fuerte entre datos y presentación.
+
+**Resolución adoptada:** se creó el catálogo (`PictogramCategory` + `Pictogram`) desde cero, corrigiendo ambos defectos. El símbolo (`emoji`) es ahora una columna obligatoria — un dato, no código. El color se reemplazó por un token semántico (`severity`: `critical`, `warning`, `info`, `neutral`); el frontend decide cómo pintarlo, el backend solo comunica el significado clínico.
+
+**Separación de responsabilidades entre roles de administración.** La matriz de capacidades del contrato marca "Gestionar pictogramas" como exclusivo de `admin_institucional` — **sin incluir a `super_admin`**, a pesar de ser el rol de mayor alcance del sistema. No es un descuido: `super_admin` gestiona la *estructura* del sistema (organizaciones, centros, unidades) y es un rol "libre", sin centro asociado; `admin_institucional` gestiona la *operación clínica* de un centro específico, y los pictogramas son contenido operativo de esa atención diaria. Esta distinción ya se había confirmado en el Hito 1, donde incluso `super_admin` tiene `return false` explícito para editar la ficha de un paciente.
+
+Esta separación se verificó con evidencia HTTP real, ejecutada desde Swagger con dos tokens de usuarios reales:
+
+![Listado de categorías de pictogramas](capturas/70_pictograms_categorias_200.png)
+
+*`GET /pictogram-categories` — respuesta 200 con las 4 categorías del catálogo, en el orden definido por `sort_order`. Endpoint accesible tanto a personal de salud como al paciente, según exige el contrato: ambos necesitan este catálogo para construir mensajes.*
+
+![Listado de pictogramas activos](capturas/71_pictograms_listar_200.png)
+
+*`GET /pictograms` — respuesta 200 con los 9 pictogramas sembrados, ordenados por categoría y luego por posición. Cada uno incluye su `emoji` real y su `severity` como token semántico, nunca una clase de estilo.*
+
+![Intento de creación rechazado para Super Admin](capturas/72_pictograms_crear_forbidden_403.png)
+
+*`POST /pictograms` con el token de **Super Admin** — rechazado con `403 FORBIDDEN_ROLE`. Esta es la evidencia central del hito: confirma en ejecución, no solo en el diseño, que ni siquiera el rol de mayor jerarquía puede gestionar el catálogo de pictogramas — es responsabilidad exclusiva de `admin_institucional`.*
+
+![Creación exitosa con el rol correcto](capturas/73_pictograms_crear_exitoso_201.png)
+
+*`POST /pictograms` con el token de **Admin Institucional** — mismo body, mismo endpoint, `201 Created`. El pictograma de prueba fue eliminado y los tokens revocados tras la verificación, dejando el catálogo en su estado real de 9 pictogramas.*
+
+### 14.3 Estado de la Fase 5
+
+| Hito | Contenido | Estado |
+|---|---|---|
+| 5.0 | Acceso del paciente — token derivado del CTA, segregación de identidad | ✅ |
+| 5.1 | Catálogo de Pictogramas — categorías, severidad semántica, RBAC verificado | ✅ |
+| 5.2 | `ChatMessage` — el chat propiamente dicho | ⏳ Pendiente |
+| 5.3 | Mensajes de sistema (retrofit de los hitos S4/S5 de Fase 4) | ⏳ Pendiente |
+| 5.4 | `Consent` — consentimientos del paciente | ⏳ Pendiente |
+| 5.5 | Cascada de cierre completa (revocar consents + expirar CTA + mensaje de sistema) | ⏳ Pendiente |
+
+---
+
+## 15. Cumplimiento de la rúbrica
 
 Esta tabla resume cómo cada indicador de la rúbrica queda cubierto por las evidencias de este informe.
 
@@ -1591,7 +1674,7 @@ El trabajo documentado en este informe excede los tres indicadores mínimos. Las
 
 ---
 
-## 15. Glosario rápido
+## 16. Glosario rápido
 
 Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluador que quiera repasar los términos técnicos):
 
@@ -1629,5 +1712,5 @@ Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluado
 
 <p align="center">
   <sub>Informe de evidencias — Proyecto <strong>SeñaVida</strong> · Backend API REST · Instituto Profesional San Sebastián</sub><br/>
-  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4 completa (Hitos 1–4) · Siguiente: Fase 5 — Chat y Consentimientos</sub>
+  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4 completa (Hitos 1–4) · Sección 14: Fase 5 en curso (Hitos 5.0–5.1) · Siguiente: Hito 5.2 — ChatMessage</sub>
 </p>
