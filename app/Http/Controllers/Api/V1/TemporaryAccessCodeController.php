@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exceptions\ApiException;
 use OpenApi\Attributes as OA;
 use App\Http\Controllers\Controller;
 use App\Models\Patient;
@@ -44,16 +45,17 @@ class TemporaryAccessCodeController extends Controller
     )]
     public function store(Request $request, Patient $patient): JsonResponse
     {
-        // 1. Rate limiting: máximo 5 generaciones por IP cada 10 minutos
+        // 1. Rate limiting: maximo 5 generaciones por IP cada 10 minutos
         $throttleKey = 'cta-generate:'.$request->ip();
 
         if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
             $seconds = RateLimiter::availableIn($throttleKey);
 
-            return response()->json([
-                'success' => false,
-                'error'   => ['message' => "Demasiados intentos. Intenta de nuevo en {$seconds} segundos."],
-            ], 429);
+            throw new ApiException(
+                'TOO_MANY_ATTEMPTS',
+                "Demasiados intentos. Intenta de nuevo en {$seconds} segundos.",
+                429
+            );
         }
 
         RateLimiter::hit($throttleKey, 600);
@@ -64,12 +66,12 @@ class TemporaryAccessCodeController extends Controller
         ]);
 
         // 3. Invalidar cualquier CTA activo previo de este paciente
-        //    (Decisión: un paciente, un código activo a la vez)
+        //    (Decision: un paciente, un codigo activo a la vez)
         TemporaryAccessCode::where('patient_id', $patient->id)
             ->where('status', 'active')
             ->update(['status' => 'expired']);
 
-        // 4. Generar el código y guardar SOLO su hash
+        // 4. Generar el codigo y guardar SOLO su hash
         $plainCode = TemporaryAccessCode::generateCode();
 
         $cta = TemporaryAccessCode::create([
@@ -82,7 +84,7 @@ class TemporaryAccessCodeController extends Controller
             'max_attempts'     => 3,
         ]);
 
-        // 5. Responder con el código EN CLARO, esta única vez
+        // 5. Responder con el codigo EN CLARO, esta unica vez
         return response()->json([
             'success' => true,
             'data'    => [
@@ -93,7 +95,7 @@ class TemporaryAccessCodeController extends Controller
     }
 
     /**
-     * Valida un CTA. Lo usa Admision cuando el paciente le muestra su código.
+     * Valida un CTA. Lo usa Admision cuando el paciente le muestra su codigo.
      * Busca solo entre los codigos activos del centro de salud del funcionario.
      */
     #[OA\Post(
@@ -124,16 +126,17 @@ class TemporaryAccessCodeController extends Controller
     {
         $this->authorize('validateCode', TemporaryAccessCode::class);
 
-        // Rate limiting: máximo 5 intentos de validación por IP cada 5 minutos
+        // Rate limiting: maximo 5 intentos de validacion por IP cada 5 minutos
         $throttleKey = 'cta-validate:'.$request->ip();
 
         if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
             $seconds = RateLimiter::availableIn($throttleKey);
 
-            return response()->json([
-                'success' => false,
-                'error'   => ['message' => "Demasiados intentos. Intenta de nuevo en {$seconds} segundos."],
-            ], 429);
+            throw new ApiException(
+                'TOO_MANY_ATTEMPTS',
+                "Demasiados intentos. Intenta de nuevo en {$seconds} segundos.",
+                429
+            );
         }
 
         RateLimiter::hit($throttleKey, 300);
@@ -163,35 +166,26 @@ class TemporaryAccessCodeController extends Controller
             }
         }
 
-        // 3. Si no hay coincidencia, respuesta genérica (no revela nada)
+        // 3. Si no hay coincidencia, respuesta generica (no revela nada)
         if (! $matchingCode) {
-            return response()->json([
-                'success' => false,
-                'error'   => ['message' => 'El codigo ingresado no es valido.'],
-            ], 422);
+            throw new ApiException('INVALID_CODE', 'El codigo ingresado no es valido.', 422);
         }
 
-        // 4. Verificar expiración
+        // 4. Verificar expiracion
         if ($matchingCode->isExpired()) {
             $matchingCode->update(['status' => 'expired']);
 
-            return response()->json([
-                'success' => false,
-                'error'   => ['message' => 'El codigo ha expirado.'],
-            ], 410);
+            throw new ApiException('EXPIRED_CODE', 'El codigo ha expirado.', 410);
         }
 
         // 5. Verificar bloqueo por intentos
         if ($matchingCode->isBlocked()) {
             $matchingCode->update(['status' => 'blocked']);
 
-            return response()->json([
-                'success' => false,
-                'error'   => ['message' => 'El codigo ha sido bloqueado por demasiados intentos.'],
-            ], 403);
+            throw new ApiException('BLOCKED_CODE', 'El codigo ha sido bloqueado por demasiados intentos.', 403);
         }
 
-        // 6. Éxito: devolver datos mínimos del paciente
+        // 6. Exito: devolver datos minimos del paciente
         $patient = $matchingCode->patient;
 
         return response()->json([
