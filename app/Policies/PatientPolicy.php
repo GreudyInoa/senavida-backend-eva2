@@ -10,10 +10,13 @@ class PatientPolicy
     /**
      * ¿Puede listar pacientes? (GET /patients)
      * Solo personal clínico que necesita consultar fichas.
+     * super_admin y admin_institucional quedan fuera A PROPÓSITO:
+     * la administración de la plataforma no incluye acceso a datos
+     * clínicos (mismo principio aplicado en MedicalSessionPolicy).
      */
     public function viewAny(User $user): bool
     {
-        return in_array($user->role, ['admision', 'categorizacion', 'medico', 'super_admin']);
+        return in_array($user->role, ['admision', 'categorizacion', 'medico']);
     }
 
     /**
@@ -21,7 +24,7 @@ class PatientPolicy
      */
     public function view(User $user, Patient $patient): bool
     {
-        return in_array($user->role, ['admision', 'categorizacion', 'medico', 'super_admin']);
+        return in_array($user->role, ['admision', 'categorizacion', 'medico']);
     }
 
     /**

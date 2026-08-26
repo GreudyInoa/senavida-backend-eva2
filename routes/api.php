@@ -2,12 +2,14 @@
 
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\HealthCenterController;
+use App\Http\Controllers\Api\V1\MedicalSessionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PatientController;
 use App\Http\Controllers\Api\V1\TemporaryAccessCodeController;
 use App\Http\Controllers\Api\V1\UnitController;
 use App\Http\Controllers\Api\V1\UserController;
 use Illuminate\Support\Facades\Route;
+
 
 Route::prefix('v1')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login']);
@@ -50,5 +52,14 @@ Route::prefix('v1')->group(function () {
         Route::get('/patients/{patient}', [PatientController::class, 'show']);
 
         Route::post('/attention-codes/validate', [TemporaryAccessCodeController::class, 'validateCode']);
+
+        Route::post('/medical-sessions', [MedicalSessionController::class, 'store']);
+        Route::get('/medical-sessions/active', [MedicalSessionController::class, 'active']);
+        Route::get('/medical-sessions/{medicalSession}', [MedicalSessionController::class, 'show']);
+        Route::patch('/medical-sessions/{medicalSession}/stage', [MedicalSessionController::class, 'advance'])
+            ->middleware('session.active');
+
+        Route::post('/medical-sessions/{medicalSession}/close', [MedicalSessionController::class, 'close'])
+            ->middleware('session.active');
     });
 });

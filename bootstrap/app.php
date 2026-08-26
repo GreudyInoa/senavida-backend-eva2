@@ -1,10 +1,15 @@
 <?php
 
+use App\Exceptions\ApiException;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -17,6 +22,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->redirectGuestsTo(function (Request $request) {
             return $request->is('api/*') ? null : '/';
         });
+
+        $middleware->alias([
+            'session.active' => \App\Http\Middleware\EnsureMedicalSessionIsActive::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
@@ -27,8 +36,76 @@ return Application::configure(basePath: dirname(__DIR__))
             if ($request->is('api/*')) {
                 return response()->json([
                     'success' => false,
-                    'error'   => ['message' => 'No autenticado.'],
+                    'error'   => ['code' => 'UNAUTHENTICATED', 'message' => 'No autenticado.'],
                 ], 401);
+            }
+        });
+
+        /**
+         * Laravel convierte AuthorizationException en
+         * AccessDeniedHttpException ANTES de que la veamos --
+         * el mismo patron que ModelNotFoundException ->
+         * NotFoundHttpException. Por eso capturamos la version
+         * convertida, no la original. Las Policies mandan
+         * "CODIGO|mensaje", lo partimos aqui.
+         */
+        $exceptions->render(function (AccessDeniedHttpException $e, Request $request) {
+            if ($request->is('api/*')) {
+                $partes = explode('|', $e->getMessage(), 2);
+
+                [$code, $mensaje] = count($partes) === 2
+                    ? $partes
+                    : ['FORBIDDEN_ROLE', 'No tienes permiso para realizar esta accion.'];
+
+                return response()->json([
+                    'success' => false,
+                    'error'   => ['code' => $code, 'message' => $mensaje],
+                ], 403);
+            }
+        });
+
+        // Se mantiene por si algun contexto (ej. un comando de
+        // consola) lanza AuthorizationException sin pasar por el
+        // ciclo HTTP normal de conversion.
+        $exceptions->render(function (AuthorizationException $e, Request $request) {
+            if ($request->is('api/*')) {
+                $partes = explode('|', $e->getMessage(), 2);
+
+                [$code, $mensaje] = count($partes) === 2
+                    ? $partes
+                    : ['FORBIDDEN_ROLE', 'No tienes permiso para realizar esta accion.'];
+
+                return response()->json([
+                    'success' => false,
+                    'error'   => ['code' => $code, 'message' => $mensaje],
+                ], 403);
+            }
+        });
+
+        $exceptions->render(function (NotFoundHttpException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'success' => false,
+                    'error'   => ['code' => 'RESOURCE_NOT_FOUND', 'message' => 'El recurso solicitado no existe.'],
+                ], 404);
+            }
+        });
+
+        $exceptions->render(function (ApiException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'success' => false,
+                    'error'   => ['code' => $e->errorCode, 'message' => $e->getMessage()],
+                ], $e->statusCode);
+            }
+        });
+
+        $exceptions->render(function (HttpException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'success' => false,
+                    'error'   => ['message' => $e->getMessage() ?: 'Ha ocurrido un error.'],
+                ], $e->getStatusCode());
             }
         });
     })->create();
