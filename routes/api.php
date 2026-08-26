@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\V1\HealthCenterController;
 use App\Http\Controllers\Api\V1\MedicalSessionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PatientController;
+use App\Http\Controllers\Api\V1\PictogramCategoryController;
+use App\Http\Controllers\Api\V1\PictogramController;
 use App\Http\Controllers\Api\V1\TemporaryAccessCodeController;
 use App\Http\Controllers\Api\V1\UnitController;
 use App\Http\Controllers\Api\V1\UserController;
@@ -20,6 +22,11 @@ Route::prefix('v1')->group(function () {
 
     Route::post('/auth/patient/logout', [PatientAccessController::class, 'logout'])
         ->middleware(['auth:sanctum', 'patient.only']);
+
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::get('/pictogram-categories', [PictogramCategoryController::class, 'index']);
+        Route::get('/pictograms', [PictogramController::class, 'index']);
+    });
 
     Route::middleware(['auth:sanctum', 'staff.only'])->group(function () {
 
@@ -57,6 +64,9 @@ Route::prefix('v1')->group(function () {
         Route::get('/patients', [PatientController::class, 'index']);
         Route::get('/patients/{patient}', [PatientController::class, 'show']);
         Route::post('/attention-codes/validate', [TemporaryAccessCodeController::class, 'validateCode']);
+
+        Route::post('/pictograms', [PictogramController::class, 'store']);
+        Route::patch('/pictograms/{pictogram}', [PictogramController::class, 'update']);
 
         Route::post('/medical-sessions', [MedicalSessionController::class, 'store']);
         Route::get('/medical-sessions/active', [MedicalSessionController::class, 'active']);
