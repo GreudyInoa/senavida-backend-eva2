@@ -3477,11 +3477,9 @@ cambian con una versión mayor. El frontend **DEBE** ramificar por ellos y
 > `AccessDeniedHttpException` ambas extienden de `HttpException` y serían
 > absorbidas por ella.
 >
-> **✅ Migrado (2026-08-26).** Los `abort()` del módulo E09 (CTA, Hito 2) ya
-> usan `ApiException`. Verificado en ejecución: `INVALID_CODE` (422),
-> `EXPIRED_CODE` (410), `BLOCKED_CODE` (403) y `TOO_MANY_ATTEMPTS` (429),
-> todos con `code` presente. **El catálogo de errores queda implementado por
-> completo en autenticación, autorización, CTA y sesión médica.**
+> **Pendiente de una segunda pasada:** los `abort()` del módulo E09 (CTA, Hito 2)
+> todavía no migraron a `ApiException`, por lo que devuelven `message` sin
+> `code`. El formato del envoltorio ya es correcto; solo falta el identificador.
 
 ### 18.3 Comportamiento esperado del frontend
 

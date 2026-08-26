@@ -7,12 +7,12 @@
   <img src="https://img.shields.io/badge/Sanctum-Bearer%20Token-2E7D32?style=flat-square" alt="Sanctum"/>
   <img src="https://img.shields.io/badge/Swagger-OpenAPI%203.0-85EA2D?style=flat-square&logo=swagger&logoColor=black" alt="Swagger OpenAPI 3.0"/>
   <img src="https://img.shields.io/badge/Rúbrica-100%2F100-brightgreen?style=flat-square" alt="Rúbrica 100/100"/>
-  <img src="https://img.shields.io/badge/Fase%204-Hitos%201%2C%202%20y%203-6E48AA?style=flat-square" alt="Fase 4 Hitos 1, 2 y 3"/>
+  <img src="https://img.shields.io/badge/Fase%204-COMPLETA%20(Hitos%201--4)-2E7D32?style=flat-square" alt="Fase 4 completa"/>
 </p>
 
 > Evidencia completa de funcionamiento del backend de **SeñaVida**, probada endpoint por endpoint con **Postman** y **Swagger UI**, y verificada a nivel de base de datos con **Tinker**. Este documento acompaña la entrega del **EVA2** y demuestra, con capturas reales (no simuladas), que el proyecto cumple cada indicador de la rúbrica.
 >
-> **Alcance ampliado.** Las secciones 1–5 corresponden a la entrega original del EVA2. Las secciones 6–13 documentan el trabajo posterior de la **Fase 4**: documentación interactiva con Swagger, CRUD administrativo completo, el **Hito 1** (modelo de Paciente), el **Hito 2** (Código Temporal de Atención) y el **Hito 3** (Sesión Médica, con manejo unificado de errores).
+> **Alcance ampliado.** Las secciones 1–5 corresponden a la entrega original del EVA2. Las secciones 6–13 documentan el trabajo posterior de la **Fase 4 — Paciente, CTA y Sesión Médica**, ya **completa**: documentación interactiva con Swagger, CRUD administrativo completo (Hitos A–E), el **Hito 1** (modelo de Paciente), el **Hito 2** (Código Temporal de Atención), el **Hito 3** (Sesión Médica) y el **Hito 4** (middleware de sesión activa, además del manejo unificado de errores construido junto a él).
 
 | | |
 |---|---|
@@ -22,7 +22,7 @@
 | 🔗 **Repositorio** | [`GreudyInoa/senavida-backend-eva2`](https://github.com/GreudyInoa/senavida-backend-eva2) |
 | ⚙️ **Stack** | Laravel 13 · PHP 8.4 · PostgreSQL · Laravel Sanctum |
 | 📅 **Entrega EVA2** | 17 de agosto de 2026 |
-| 🔄 **Última actualización** | 25 de agosto de 2026 — Fase 4, Hitos 1, 2 y 3 |
+| 🔄 **Última actualización** | 25 de agosto de 2026 — Fase 4 **completa** (Hitos 1–4) |
 
 ---
 
@@ -54,11 +54,13 @@
     - 10.1 Decisiones de diseño (D-07, T2/S1) · 10.2 Recorrido por rol
     - 10.3 S1 Abrir · 10.4 S3 Listar activas · 10.5 S4 Avanzar · 10.7 S5 Cerrar
     - 10.6 Salto de emergencia (D-23) · 10.8 Hueco de seguridad · 10.9 Middleware
+    - 10.10 Investigación de un gap que no existía · 10.11 Verificación cruzada
 11. [Manejo unificado de errores](#11-manejo-unificado-de-errores)
     - 11.1 El problema · 11.2 Los 4 tipos de excepción
     - 11.3 Código legible por máquina · 11.4 Corrección de seguridad
 12. [Estado actual de la base de datos](#12-estado-actual-de-la-base-de-datos)
 13. [Detalle técnico destacado del Hito 3](#13-detalle-técnico-destacado-del-hito-3)
+    - 13.1 Índice único parcial · 13.2 Errores de implementación · 13.3 **Cierre de Fase 4**
 
 **Cierre**
 
@@ -1061,7 +1063,7 @@ Cada flecha tiene **un solo dueño**. No basta con tener el rol correcto: hay qu
 > **Endpoint:** `POST /api/v1/medical-sessions` — 🔒 rol `admision`
 > **Qué demuestra:** que el CTA validado se consume y nace la atención.
 
-*(Captura pendiente: `70_s1_abrir_atencion.png`)*
+![Abrir atención médica - S1](capturas/70_s1_abrir_atencion.png)
 
 **Petición enviada:**
 
@@ -1111,17 +1113,24 @@ Cada flecha tiene **un solo dueño**. No basta con tener el rol correcto: hay qu
 > **Endpoint:** `GET /api/v1/medical-sessions/active` — 🔒 rol clínico
 > **Qué demuestra:** que el panel puede consultar todas las atenciones en curso de su unidad.
 
-*(Captura pendiente: `71_s3_listar_activas.png`)*
+**Resultado obtenido:** `200 OK` con un **array de tres sesiones**, todas en `Urgencia Adulto` del Hospital San Rafael, ordenadas por hora de inicio:
 
-**Resultado obtenido:** `200 OK` con un **array de dos sesiones** — Juan Soto y María Fernández, ambas en `Urgencia Adulto` del Hospital San Rafael, ordenadas por hora de inicio.
+```json
+{
+  "success": true,
+  "data": [
+    { "id": "01a039b7-...", "status": "in_admission", "patient": { "name": "Prueba Errores" } },
+    { "id": "01a03c13-...", "status": "in_admission", "patient": { "name": "Paciente Prueba Uno" } },
+    { "id": "01a03c15-...", "status": "in_admission", "patient": { "name": "Paciente Prueba Dos" } }
+  ]
+}
+```
 
 > **Una corrección al contrato original.** El contrato describía *"la sesión activa"* en singular. Se implementó como **lista** porque una unidad de urgencias puede tener varios pacientes en curso simultáneamente. Devolver solo la más reciente habría **ocultado pacientes** del panel — un error silencioso y potencialmente grave. La captura confirma el caso real con dos atenciones abiertas a la vez.
 
 ### 10.5 S4 · Avanzar de etapa
 
-*(Captura pendiente: `72_s4_avanzar_ok.png`)*
-
-**Resultado obtenido:** `200 OK`. Con el token de `admision`, la sesión pasó de `in_admission` a:
+**Resultado obtenido:** `200 OK`. Con el token de `admision`, la sesión del "Paciente Prueba Uno" pasó de `in_admission` a:
 
 ```json
 { "status": "in_triage", "statusLabel": "Categorización" }
@@ -1129,13 +1138,21 @@ Cada flecha tiene **un solo dueño**. No basta con tener el rol correcto: hay qu
 
 **La prueba inversa — el mismo usuario, la etapa siguiente:**
 
-*(Captura pendiente: `73_s4_403_tramo_ajeno.png`)*
+**Resultado obtenido:** `403 Forbidden`. Con el **mismo token de `admision`**, repetir la petición sobre la misma sesión —ya en `in_triage`— es rechazado: ese tramo le pertenece a `categorizacion`.
 
-**Resultado obtenido:** `403 Forbidden`. Con el **mismo token de `admision`**, intentar avanzar la sesión que ahora está en `in_triage` es rechazado: ese tramo le pertenece a `categorizacion`.
+```json
+{
+  "success": false,
+  "error": {
+    "code": "FORBIDDEN_ROLE",
+    "message": "Esta etapa corresponde avanzarla a categorizacion, no a tu rol."
+  }
+}
+```
 
 **Y el bloqueo por unidad:**
 
-*(Captura pendiente: `74_s4_403_otra_unidad.png`)*
+**Resultado obtenido:** `403 Forbidden`. Con un token de `categorizacion` —rol correcto para esta etapa— pero de **Urgencia Infantil**, sobre una sesión de **Urgencia Adulto**:
 
 ```json
 {
@@ -1157,7 +1174,15 @@ Un usuario de `categorizacion` de **Urgencia Infantil** no puede avanzar una ate
 
 **Endpoint:** el mismo `PATCH /medical-sessions/{id}/stage`, con un modo especial en el body.
 
-*(Captura pendiente: `75_emergencia_salto.png`)*
+**Preparación del caso de prueba — un paciente y su atención, de cero:**
+
+![Registro del paciente de prueba](capturas/74_paciente_prueba_emergencia.png)
+![Generación del CTA](capturas/75_cta_generar_emergencia.png)
+![Validación del CTA](capturas/76_cta_validar_emergencia.png)
+
+Con la atención abierta y todavía en `in_admission`, se activó el salto:
+
+![Salto de emergencia ejecutado](capturas/79_emergencia_salto_200.png)
 
 **Petición enviada:**
 
@@ -1196,7 +1221,7 @@ Un usuario de `categorizacion` de **Urgencia Infantil** no puede avanzar una ate
 
 ### 10.7 S5 · Cerrar la atención
 
-*(Captura pendiente: `76_s5_cierre_exitoso.png`)*
+![Cierre de la atención tras la emergencia](capturas/80_s5_cierre_tras_emergencia.png)
 
 **Resultado obtenido:** `200 OK`.
 
@@ -1248,9 +1273,29 @@ public function close(User $user, MedicalSession $session): Response
 = false
 ```
 
+**El hallazgo del bug, documentado con su propia evidencia — antes y después.** Al agregar el campo `code`, apareció un segundo problema: Laravel convierte `AuthorizationException` en `AccessDeniedHttpException` antes de que el handler la vea, así que la regla que separaba `code` de `message` nunca se ejecutaba.
+
+*Antes de la corrección* — el código quedó pegado dentro del mismo texto:
+
+![Error con code y message sin separar](capturas/77_error_sin_code_antes_del_fix.png)
+
+```json
+{ "error": { "message": "INVALID_STAGE_TRANSITION|Esta atencion aun no ha llegado a Consulta Medica." } }
+```
+
+*Después* de capturar `AccessDeniedHttpException` en vez de `AuthorizationException` — la misma prueba, exacta:
+
+![Error con code y message correctamente separados](capturas/78_error_con_code_despues_del_fix.png)
+
+```json
+{ "error": { "code": "INVALID_STAGE_TRANSITION", "message": "Esta atencion aun no ha llegado a Consulta Medica." } }
+```
+
 > 💡 **La lección.** El hueco no apareció leyendo el código, sino **probando un caso que no era el camino feliz**. Vale la pena diseñar las pruebas preguntando *"¿qué pasa si alguien hace esto fuera de orden?"*, no solo *"¿funciona cuando todo va bien?"*.
 
-### 10.9 Middleware `EnsureMedicalSessionIsActive`
+### 10.9 Middleware `EnsureMedicalSessionIsActive` — Hito 4 de Fase 4
+
+> **Nota de alcance.** Aunque se construyó en la misma sesión de trabajo que la Sesión Médica, este middleware corresponde formalmente al **Hito 4** de Fase 4 según el mapa del proyecto — un hito propio, no un detalle del Hito 3. Con esta pieza, **Fase 4 (Paciente, CTA y Sesión Médica) queda completa: los cuatro hitos definidos están construidos y verificados**.
 
 > **Qué problema resuelve.** El propio contrato marca como riesgo crítico: *"R4 — El cierre de sesión no bloquea escrituras"*. Sin esta pieza, nada impediría escribir signos vitales o notas clínicas sobre una atención ya cerrada.
 
@@ -1260,9 +1305,7 @@ Un **middleware** es una capa que intercepta la petición **antes** de que llegu
 Petición → auth:sanctum → session.active (¿está cerrada? corta aquí) → Controlador
 ```
 
-*(Captura pendiente: `77_middleware_409_sesion_cerrada.png`)*
-
-**Resultado obtenido:** `409 Conflict` al intentar avanzar una sesión ya cerrada.
+**Resultado obtenido:** `409 Conflict` al intentar avanzar la sesión de María, ya cerrada previamente (sección 10.7).
 
 ```json
 {
@@ -1275,6 +1318,34 @@ Petición → auth:sanctum → session.active (¿está cerrada? corta aquí) →
 ```
 
 > **Por qué se construyó ahora, si ningún módulo clínico existe todavía.** Precisamente para que cuando se construyan (signos vitales, notas, chat), **no haya que copiar la validación en cada controlador**. Basta agregar `->middleware('session.active')` a la ruta. Un día alguien olvidaría copiar ese `if`, y ahí aparecería el hueco real.
+
+---
+
+### 10.10 Investigación de un gap que resultó no existir
+
+> **Cómo surgió.** Tras corregir el hueco de `close()`, se planteó una pregunta más amplia: *¿qué pasa si a cualquier endpoint de `medical-sessions` le llega un identificador que ni siquiera tiene forma de UUID?* Se decidió comprobarlo en vez de asumir.
+
+**Primer intento — un UUID válido pero inexistente:**
+
+![404 limpio para un UUID que no existe](capturas/71_error_404_uuid_falso.png)
+
+**Resultado obtenido:** `404 Not Found`, manejado correctamente por Laravel — aunque en ese momento el mensaje todavía exponía el nombre interno de la clase (`App\Models\MedicalSession`), el gap descrito en la sección 11.2.
+
+**Segundo intento — provocar el mismo error desde Swagger con un texto que ni siquiera parece un UUID:**
+
+![Swagger bloquea el valor antes de enviarlo](capturas/72_swagger_validacion_guid.png)
+
+**Resultado obtenido:** la propia documentación interactiva lo rechazó *antes* de que la petición saliera del navegador — `"Value must be a Guid"` —, porque el atributo `#[OA\Parameter(...)]` del endpoint ya declara `format: 'uuid'`.
+
+**Conclusión:** para probar el caso real hubo que saltarse Swagger y usar `curl` directo. El resultado (documentado en la sección 11.2) fue que Laravel maneja ambos casos —UUID inexistente y texto inválido— de la misma forma segura, sin el `QueryException` sin capturar que se sospechaba. La investigación no confirmó el bug temido, pero sí confirmó que el sistema es más robusto de lo esperado — un resultado tan válido como encontrar un error.
+
+### 10.11 Verificación cruzada: la sesión cerrada de María sigue siendo consultable
+
+Como parte de confirmar que el arreglo del `404` no había roto el camino feliz, se repitió `GET /medical-sessions/{id}` sobre la sesión de María —ya cerrada— con su historial completo:
+
+![Detalle de sesión cerrada, consultada sin problemas](capturas/73_s2_ver_sesion_cerrada.png)
+
+**Resultado obtenido:** `200 OK`, con `status: "closed"` y todo el detalle intacto: `ctaCode`, `closureReason`, `summary`, unidad y centro. Confirma que cerrar una atención no le quita capacidad de **lectura** — solo de escritura, que es exactamente lo que exige el middleware `session.active`.
 
 ---
 
@@ -1334,7 +1405,7 @@ El contrato es explícito en §18.2:
 
 La razón es práctica: el texto de un mensaje puede cambiar de redacción en cualquier momento; el identificador `SESSION_ALREADY_CLOSED` es un contrato estable.
 
-*(Captura pendiente: `78_error_con_code.png`)*
+> **Nota:** el descubrimiento de esta corrección, con su evidencia antes/después, está documentado en la sección 10.8.
 
 **Resultado obtenido:**
 
@@ -1389,9 +1460,27 @@ return in_array($user->role, ['admision', 'categorizacion', 'medico']);
 
 > **Qué demuestra:** que todas las tablas del sistema, incluidas las de los tres hitos, están efectivamente creadas en PostgreSQL.
 
-*(Captura pendiente: `79_migrate_status_hito3.png`)*
-
 **Resultado obtenido:** las **dieciséis** migraciones del proyecto figuran en estado **`Ran`**, sin ninguna pendiente ni fallida.
+
+```
+  Migration name ..................................................... Batch / Status
+  0001_01_01_000000_create_users_table ...................................... [1] Ran
+  0001_01_01_000001_create_cache_table ...................................... [1] Ran
+  0001_01_01_000002_create_jobs_table ....................................... [1] Ran
+  2026_08_07_033306_create_personal_access_tokens_table ..................... [1] Ran
+  2026_08_07_044802_create_audit_logs_table .................................. [1] Ran
+  2026_08_08_040215_create_organizations_table ............................... [1] Ran
+  2026_08_08_041854_create_health_centers_table ............................... [1] Ran
+  2026_08_08_044552_create_units_table ....................................... [1] Ran
+  2026_08_08_052132_add_foreign_keys_to_users_table ........................... [1] Ran
+  2026_08_21_045743_create_patients_table ..................................... [2] Ran
+  2026_08_21_045744_create_patient_contacts_table ............................. [2] Ran
+  2026_08_24_190328_create_temporary_access_codes_table ........................ [3] Ran
+  2026_08_25_000001_create_medical_sessions_table .............................. [4] Ran
+  2026_08_25_000002_add_consumed_status_to_temporary_access_codes_table ........ [4] Ran
+  2026_08_25_000003_add_cta_code_to_medical_sessions_table ...................... [5] Ran
+  2026_08_25_000004_add_triage_skip_to_medical_sessions_table .................. [6] Ran
+```
 
 ```
   2026_08_21_045743_create_patients_table ..................................... [2] Ran
@@ -1454,6 +1543,21 @@ Se había usado `$table->ulid()` donde el proyecto usa `uuid`. Se parecen a simp
 **`$fillable` descarta campos en silencio.** Tras agregar la columna `cta_code`, la respuesta seguía devolviendo `"ctaCode": null` — sin ningún error.
 
 La causa: `$fillable` es una **lista blanca**. Eloquent solo acepta de un `create()` los campos declarados ahí; cualquier otro lo **descarta sin avisar**. Es una protección contra *mass assignment* (evitar que alguien cuele un campo inesperado desde un formulario), pero el costo es que un campo legítimo olvidado se pierde en silencio.
+
+---
+
+### 13.3 Fase 4 — Cierre
+
+| Hito | Qué construyó | Estado |
+|:---:|---|:---:|
+| 0 | Saneamiento técnico + Swagger | ✅ |
+| A–E | CRUD administrativo completo (4 entidades, Policy, multitenancy) | ✅ |
+| 1 | Modelo Paciente (autorregistro público) | ✅ |
+| 2 | CTA — generar y validar | ✅ |
+| 3 | Sesión Médica — 5 endpoints, Policy por rol/unidad/etapa, salto de emergencia | ✅ |
+| 4 | Middleware de sesión activa | ✅ |
+
+**Fase 4 — Paciente, CTA y Sesión Médica — completa.** Los cuatro hitos definidos en el mapa del proyecto están construidos, probados en ejecución y documentados. La siguiente etapa es **Fase 5 — Chat y Consentimientos**, que el propio contrato describe como *"el núcleo del producto"*.
 
 ---
 
@@ -1525,5 +1629,5 @@ Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluado
 
 <p align="center">
   <sub>Informe de evidencias — Proyecto <strong>SeñaVida</strong> · Backend API REST · Instituto Profesional San Sebastián</sub><br/>
-  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4, Hitos 1, 2 y 3</sub>
+  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4 completa (Hitos 1–4) · Siguiente: Fase 5 — Chat y Consentimientos</sub>
 </p>
