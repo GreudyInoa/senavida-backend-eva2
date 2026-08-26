@@ -1,6 +1,7 @@
 <?php
 use App\Http\Controllers\Api\V1\Auth\PatientAccessController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\ChatMessageController;
 use App\Http\Controllers\Api\V1\HealthCenterController;
 use App\Http\Controllers\Api\V1\MedicalSessionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
@@ -26,6 +27,12 @@ Route::prefix('v1')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/pictogram-categories', [PictogramCategoryController::class, 'index']);
         Route::get('/pictograms', [PictogramController::class, 'index']);
+
+        Route::get('/medical-sessions/{medicalSession}/messages', [ChatMessageController::class, 'index']);
+        Route::post('/medical-sessions/{medicalSession}/messages', [ChatMessageController::class, 'store'])
+            ->middleware('session.active');
+        Route::post('/messages/{message}/confirm', [ChatMessageController::class, 'confirm']);
+        Route::post('/messages/{message}/read', [ChatMessageController::class, 'markAsRead']);
     });
 
     Route::middleware(['auth:sanctum', 'staff.only'])->group(function () {

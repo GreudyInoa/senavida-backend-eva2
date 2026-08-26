@@ -9,13 +9,29 @@ use App\Http\Resources\MedicalSessionResource;
 use App\Models\MedicalSession;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use OpenApi\Attributes as OA;
 
 class PatientAccessController extends Controller
 {
-    /**
-     * Canjea un código de atención (CTA) por un token de acceso
-     * acotado a la sesión médica que ese código abrió.
-     */
+    #[OA\Post(
+        path: '/auth/patient/redeem',
+        summary: 'Canjear un codigo de atencion (CTA) por un token de paciente',
+        description: 'Endpoint publico. El token resultante queda acotado unicamente a la atencion que abrio ese codigo.',
+        tags: ['Autenticacion'],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['ctaCode'],
+                properties: [
+                    new OA\Property(property: 'ctaCode', type: 'string', example: 'SV-535442'),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 200, description: 'Token de paciente emitido correctamente'),
+            new OA\Response(response: 422, description: 'Codigo invalido, expirado o de una atencion cerrada'),
+        ]
+    )]
     public function redeem(PatientRedeemRequest $request): JsonResponse
     {
         $ctaCode = $request->string('ctaCode')->trim()->upper()->value();
@@ -36,7 +52,6 @@ class PatientAccessController extends Controller
         $patient = $session->patient;
 
         return DB::transaction(function () use ($patient, $session) {
-            // Un dispositivo a la vez: se revoca cualquier token anterior.
             $patient->tokens()->delete();
 
             $token = $patient->createToken(
@@ -55,9 +70,14 @@ class PatientAccessController extends Controller
         });
     }
 
-    /**
-     * Revoca el token actual del paciente (logout del portal).
-     */
+    #[OA\Post(
+        path: '/auth/patient/logout',
+        summary: 'Cerrar sesion del portal del paciente',
+        description: 'Revoca el token actual del paciente.',
+        tags: ['Autenticacion'],
+        security: [['bearerAuth' => []]],
+        responses: [new OA\Response(response: 200, description: 'Sesion cerrada correctamente')]
+    )]
     public function logout(): JsonResponse
     {
         $request = request();
