@@ -66,7 +66,8 @@
 
 14. [Fase 5 — Chat y Consentimientos (en curso)](#14-fase-5--chat-y-consentimientos-en-curso)
     - 14.1 Hito 5.0 — Acceso del paciente (token derivado del CTA)
-    - 14.2 Hito 5.1 — Catálogo de Pictogramas · 14.3 Estado de la fase
+    - 14.2 Hito 5.1 — Catálogo de Pictogramas
+    - 14.3 Hito 5.2 — `ChatMessage`: el chat de la atención · 14.4 Estado de la fase
 
 **Cierre**
 
@@ -1069,8 +1070,6 @@ Cada flecha tiene **un solo dueño**. No basta con tener el rol correcto: hay qu
 > **Endpoint:** `POST /api/v1/medical-sessions` — 🔒 rol `admision`
 > **Qué demuestra:** que el CTA validado se consume y nace la atención.
 
-![Abrir atención médica - S1](capturas/70_s1_abrir_atencion.png)
-
 **Petición enviada:**
 
 ```json
@@ -1182,13 +1181,7 @@ Un usuario de `categorizacion` de **Urgencia Infantil** no puede avanzar una ate
 
 **Preparación del caso de prueba — un paciente y su atención, de cero:**
 
-![Registro del paciente de prueba](capturas/74_paciente_prueba_emergencia.png)
-![Generación del CTA](capturas/75_cta_generar_emergencia.png)
-![Validación del CTA](capturas/76_cta_validar_emergencia.png)
-
 Con la atención abierta y todavía en `in_admission`, se activó el salto:
-
-![Salto de emergencia ejecutado](capturas/79_emergencia_salto_200.png)
 
 **Petición enviada:**
 
@@ -1226,8 +1219,6 @@ Con la atención abierta y todavía en `in_admission`, se activó el salto:
 > **El principio aplicado:** el control no está en impedir el salto, sino en hacerlo **imposible de ocultar**. El mínimo de 30 caracteres existe justamente para eso: *"emergencia."* (11 caracteres) no sirve para auditar; el motivo del ejemplo sí.
 
 ### 10.7 S5 · Cerrar la atención
-
-![Cierre de la atención tras la emergencia](capturas/80_s5_cierre_tras_emergencia.png)
 
 **Resultado obtenido:** `200 OK`.
 
@@ -1283,15 +1274,11 @@ public function close(User $user, MedicalSession $session): Response
 
 *Antes de la corrección* — el código quedó pegado dentro del mismo texto:
 
-![Error con code y message sin separar](capturas/77_error_sin_code_antes_del_fix.png)
-
 ```json
 { "error": { "message": "INVALID_STAGE_TRANSITION|Esta atencion aun no ha llegado a Consulta Medica." } }
 ```
 
 *Después* de capturar `AccessDeniedHttpException` en vez de `AuthorizationException` — la misma prueba, exacta:
-
-![Error con code y message correctamente separados](capturas/78_error_con_code_despues_del_fix.png)
 
 ```json
 { "error": { "code": "INVALID_STAGE_TRANSITION", "message": "Esta atencion aun no ha llegado a Consulta Medica." } }
@@ -1333,13 +1320,9 @@ Petición → auth:sanctum → session.active (¿está cerrada? corta aquí) →
 
 **Primer intento — un UUID válido pero inexistente:**
 
-![404 limpio para un UUID que no existe](capturas/71_error_404_uuid_falso.png)
-
 **Resultado obtenido:** `404 Not Found`, manejado correctamente por Laravel — aunque en ese momento el mensaje todavía exponía el nombre interno de la clase (`App\Models\MedicalSession`), el gap descrito en la sección 11.2.
 
 **Segundo intento — provocar el mismo error desde Swagger con un texto que ni siquiera parece un UUID:**
-
-![Swagger bloquea el valor antes de enviarlo](capturas/72_swagger_validacion_guid.png)
 
 **Resultado obtenido:** la propia documentación interactiva lo rechazó *antes* de que la petición saliera del navegador — `"Value must be a Guid"` —, porque el atributo `#[OA\Parameter(...)]` del endpoint ya declara `format: 'uuid'`.
 
@@ -1348,8 +1331,6 @@ Petición → auth:sanctum → session.active (¿está cerrada? corta aquí) →
 ### 10.11 Verificación cruzada: la sesión cerrada de María sigue siendo consultable
 
 Como parte de confirmar que el arreglo del `404` no había roto el camino feliz, se repitió `GET /medical-sessions/{id}` sobre la sesión de María —ya cerrada— con su historial completo:
-
-![Detalle de sesión cerrada, consultada sin problemas](capturas/73_s2_ver_sesion_cerrada.png)
 
 **Resultado obtenido:** `200 OK`, con `status: "closed"` y todo el detalle intacto: `ctaCode`, `closureReason`, `summary`, unidad y centro. Confirma que cerrar una atención no le quita capacidad de **lectura** — solo de escritura, que es exactamente lo que exige el middleware `session.active`.
 
@@ -1631,13 +1612,58 @@ Esta separación se verificó con evidencia HTTP real, ejecutada desde Swagger c
 
 *`POST /pictograms` con el token de **Admin Institucional** — mismo body, mismo endpoint, `201 Created`. El pictograma de prueba fue eliminado y los tokens revocados tras la verificación, dejando el catálogo en su estado real de 9 pictogramas.*
 
-### 14.3 Estado de la Fase 5
+### 14.3 Hito 5.2 — `ChatMessage`: el chat de la atención
+
+**El problema.** Es la funcionalidad central del producto — el canal de mensajes entre paciente y personal de salud. El análisis del prototipo detectó una vulnerabilidad real: el frontend armaba el mensaje completo, **incluyendo quién lo enviaba**, directamente en el navegador. Cualquiera con acceso a las herramientas de desarrollo podía modificar ese código y hacerse pasar por otra persona — por ejemplo, un paciente enviando un mensaje que aparentara venir del médico.
+
+**Resolución adoptada: el backend deriva la identidad, nunca confía en el cliente.**
+
+```php
+if ($user instanceof Patient) {
+    $senderType = 'patient';
+    $senderId   = null; // el contrato exige NULL para el paciente
+    $senderName = $user->name;
+    $origin     = MessageOrigin::Patient;
+} else {
+    $senderType = 'staff';
+    $senderId   = $user->id;
+    $origin     = match ($user->role) {
+        'admision'       => MessageOrigin::Admission,
+        'categorizacion' => MessageOrigin::Triage,
+        'medico'         => MessageOrigin::Doctor,
+    };
+}
+```
+
+El cliente nunca envía `senderType`, `senderId`, `senderName` ni `origin` — el `FormRequest` de este endpoint ni siquiera los valida, por lo que cualquier valor que el cliente intentara mandar en esos campos se ignora por completo.
+
+**`senderName` como copia, no como relación en vivo.** Se guarda el nombre del emisor directamente en la fila del mensaje. Si el médico cambia de nombre o se desactiva su cuenta meses después, el mensaje histórico debe seguir mostrando quién lo escribió *en ese momento* — es un registro clínico-legal, no un dato que deba actualizarse retroactivamente.
+
+**Verificación con tres actores reales de la misma atención.** Se probó el ciclo completo en Swagger: un médico enviando un mensaje, la paciente dueña de esa atención canjeando su código y enviando otro, y el médico marcando el mensaje de la paciente como leído.
+
+![Mensaje enviado por el médico](capturas/74_chat_medico_crea_mensaje_201.png)
+
+*`POST /medical-sessions/{id}/messages` con el token del **Dr. Uno SR** — `201 Created`. Nótese que el body enviado solo contenía `body`, `messageType` y `pictogramId`; aun así, la respuesta incluye `"senderType": "staff"`, `"senderId"` con el UUID real del médico, `"senderName": "Dr. Uno SR"` y `"origin": "doctor"` — todo calculado por el backend a partir del token, nunca escrito por el cliente.*
+
+![Canje del código para obtener el token de la paciente](capturas/75_chat_redeem_paciente_para_chat_200.png)
+
+*`POST /auth/patient/redeem` — `200`, confirmando que el flujo de acceso construido en el Hito 5.0 interopera correctamente con el chat: el mismo `cta_code` de la atención permite a la paciente obtener un token acotado a esa conversación.*
+
+![Mensaje enviado por la paciente](capturas/76_chat_paciente_crea_mensaje_201.png)
+
+*`POST /medical-sessions/{id}/messages` con el token de la **paciente** — `201 Created`. La respuesta muestra `"senderType": "patient"`, `"senderId": null` (tal como exige el contrato) y `"senderName": "Paciente Prueba Dos"`. Nótese además `"confirmedByPatientAt"` con una fecha, no `null`: cuando el propio paciente envía un mensaje, queda auto-confirmado — no puede "no haber leído" lo que él mismo escribió.*
+
+![Mensaje marcado como leído por el médico](capturas/77_chat_marcar_leido_200.png)
+
+*`POST /messages/{id}/read` sobre el mensaje de la paciente, con el token del médico — `200`, con `"status": "read"`. Confirma que el personal de salud puede marcar como leídos los mensajes de la conversación.*
+
+### 14.4 Estado de la Fase 5
 
 | Hito | Contenido | Estado |
 |---|---|---|
 | 5.0 | Acceso del paciente — token derivado del CTA, segregación de identidad | ✅ |
 | 5.1 | Catálogo de Pictogramas — categorías, severidad semántica, RBAC verificado | ✅ |
-| 5.2 | `ChatMessage` — el chat propiamente dicho | ⏳ Pendiente |
+| 5.2 | `ChatMessage` — chat con derivación de identidad desde el backend, verificado con evidencia real | ✅ |
 | 5.3 | Mensajes de sistema (retrofit de los hitos S4/S5 de Fase 4) | ⏳ Pendiente |
 | 5.4 | `Consent` — consentimientos del paciente | ⏳ Pendiente |
 | 5.5 | Cascada de cierre completa (revocar consents + expirar CTA + mensaje de sistema) | ⏳ Pendiente |
@@ -1712,5 +1738,5 @@ Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluado
 
 <p align="center">
   <sub>Informe de evidencias — Proyecto <strong>SeñaVida</strong> · Backend API REST · Instituto Profesional San Sebastián</sub><br/>
-  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4 completa (Hitos 1–4) · Sección 14: Fase 5 en curso (Hitos 5.0–5.1) · Siguiente: Hito 5.2 — ChatMessage</sub>
+  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4 completa (Hitos 1–4) · Sección 14: Fase 5 en curso (Hitos 5.0–5.2) · Siguiente: Hito 5.3 — mensajes de sistema</sub>
 </p>
