@@ -11,6 +11,7 @@ use App\Http\Requests\StoreMedicalSessionRequest;
 use App\Http\Resources\MedicalSessionResource;
 use App\Models\MedicalSession;
 use App\Models\TemporaryAccessCode;
+use App\Services\SystemMessageService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use OpenApi\Attributes as OA;
@@ -184,6 +185,12 @@ class MedicalSessionController extends Controller
         }
 
         $medicalSession->update(['status' => $siguienteEtapa->value]);
+
+        SystemMessageService::create(
+            $medicalSession,
+            "La atencion avanzo a {$siguienteEtapa->label()}."
+        );
+
         $medicalSession->load(['patient', 'creator', 'closer', 'healthCenter', 'unit']);
 
         return response()->json([
@@ -206,6 +213,11 @@ class MedicalSessionController extends Controller
             'triage_skip_reason' => $request->validated('reason'),
             'triage_skipped_by' => $request->user()->id,
         ]);
+
+        SystemMessageService::create(
+            $medicalSession,
+            'La atencion salto directamente a Consulta Medica por criterio de emergencia.'
+        );
 
         $medicalSession->load(['patient', 'creator', 'closer', 'healthCenter', 'unit', 'triageSkippedBy']);
 
@@ -248,6 +260,8 @@ class MedicalSessionController extends Controller
             summary: $request->validated('summary'),
             closedBy: $request->user(),
         );
+
+        SystemMessageService::create($medicalSession, 'La atencion fue cerrada.');
 
         $medicalSession->load(['patient', 'creator', 'closer', 'healthCenter', 'unit']);
 
