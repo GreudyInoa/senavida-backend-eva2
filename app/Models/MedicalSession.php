@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Enums\ConsentStatus;
 use App\Enums\MedicalSessionStatus;
+use App\Services\SystemMessageService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class MedicalSession extends Model
 {
@@ -81,17 +85,42 @@ class MedicalSession extends Model
         return $this->belongsTo(User::class, 'triage_skipped_by');
     }
 
+    public function consents(): HasMany
+    {
+        return $this->hasMany(Consent::class);
+    }
+
+    /**
+     * Cierra la atencion como una unica operacion atomica: si cualquier
+     * paso falla, ninguno se aplica. Efectos: actualiza el estado,
+     * revoca el acceso del paciente, revoca los consentimientos que
+     * seguian vigentes, expira el CTA, y deja constancia en el chat.
+     */
     public function closeSession(string $closureReason, string $summary, User $closedBy): void
     {
-        $this->update([
-            'status' => MedicalSessionStatus::Closed->value,
-            'ended_at' => now(),
-            'closure_reason' => $closureReason,
-            'summary' => $summary,
-            'closed_by' => $closedBy->id,
-        ]);
+        DB::transaction(function () use ($closureReason, $summary, $closedBy) {
+            $this->update([
+                'status' => MedicalSessionStatus::Closed->value,
+                'ended_at' => now(),
+                'closure_reason' => $closureReason,
+                'summary' => $summary,
+                'closed_by' => $closedBy->id,
+            ]);
 
-        // El acceso del paciente termina con la atencion (S8.7, S11.3).
-        $this->patient->tokens()->delete();
+            $this->patient->tokens()->delete();
+
+            $this->consents()
+                ->where('status', ConsentStatus::Granted->value)
+                ->get()
+                ->each(fn ($consent) => $consent->update([
+                    'status' => ConsentStatus::Revoked->value,
+                    'revoked_at' => now(),
+                    'evidence' => ['reason' => 'session_closed'],
+                ]));
+
+            $this->temporaryAccessCode?->update(['status' => 'expired']);
+
+            SystemMessageService::create($this, 'La atencion fue cerrada.');
+        });
     }
 }

@@ -261,8 +261,6 @@ class MedicalSessionController extends Controller
             closedBy: $request->user(),
         );
 
-        SystemMessageService::create($medicalSession, 'La atencion fue cerrada.');
-
         $medicalSession->load(['patient', 'creator', 'closer', 'healthCenter', 'unit']);
 
         return response()->json([
