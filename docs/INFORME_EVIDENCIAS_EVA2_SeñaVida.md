@@ -68,7 +68,8 @@
     - 14.1 Hito 5.0 — Acceso del paciente (token derivado del CTA)
     - 14.2 Hito 5.1 — Catálogo de Pictogramas
     - 14.3 Hito 5.2 — `ChatMessage`: el chat de la atención
-    - 14.4 Hito 5.3 — Mensajes de sistema · 14.5 Estado de la fase
+    - 14.4 Hito 5.3 — Mensajes de sistema
+    - 14.5 Hito 5.4 — `Consent`: el sistema de consentimientos · 14.6 Estado de la fase
 
 **Cierre**
 
@@ -1697,7 +1698,41 @@ Reutiliza el método `label()` que ya existía en `MedicalSessionStatus` desde F
 
 *El mensaje quedó mezclado cronológicamente con los mensajes humanos anteriores del médico y la paciente, confirmando que la deuda de Fase 4 se pagó correctamente.*
 
-### 14.5 Estado de la Fase 5
+### 14.5 Hito 5.4 — `Consent`: el sistema de consentimientos
+
+**El problema.** El médico necesita poder solicitar un permiso al paciente (por ejemplo, compartir su información con un contacto de emergencia), pero **solo el paciente** puede decidir sobre su propia atención — ni siquiera quien solicitó el permiso, ni un `super_admin`, debe poder responder en su nombre.
+
+**Máquina de estados con transiciones controladas en el modelo:**
+
+```
+pending ──approve──> granted ──revoke──> revoked
+   │
+   └──reject──> rejected
+```
+
+Cada transición (`approve`, `reject`, `revoke`) valida su propio estado de origen **dentro del modelo** `Consent`, no en el controlador — así, sin importar desde dónde se invoque, nunca es posible saltarse un paso de la máquina (por ejemplo, revocar algo que nunca se otorgó).
+
+**Plantillas en vez de texto libre (D-08).** El título y la descripción de cada consentimiento se generan desde el enum `ConsentType` al momento de responder, nunca los escribe el médico a mano. Es una decisión de seguridad: si el texto fuera libre, un error de tipeo con dos contactos de apellido parecido podría autorizar el envío de datos clínicos a la persona equivocada.
+
+**Verificación con evidencia real**, sobre la misma sesión usada en los hitos anteriores, con un médico y la paciente dueña de la atención:
+
+![Solicitud de consentimiento creada por el médico](capturas/80_consent_solicitar_201.png)
+
+*`POST /medical-sessions/{id}/consent-requests` con el token del **Dr. Uno SR** — `201 Created`. El `title` ("Inicio de la atención") y la `description` se generaron desde la plantilla del tipo `start_care`, sin que el médico escribiera ese texto.*
+
+![El médico intenta aprobar su propia solicitud](capturas/81_consent_medico_aprobar_403.png)
+
+*`POST /consent-requests/{id}/approve` con el **mismo token del médico** — `403 WRONG_TOKEN_TYPE`, `"Este recurso es exclusivo del paciente."` Esta es la evidencia central del hito: el middleware bloquea a quien solicitó el consentimiento antes de que la Policy siquiera se evalúe, confirmando en ejecución la regla de autonomía del paciente.*
+
+![La paciente aprueba su propio consentimiento](capturas/82_consent_paciente_aprobar_200.png)
+
+*`POST /consent-requests/{id}/approve` con el token de la **paciente** dueña de la atención — `200`, `"status": "granted"`, con `grantedAt` registrado.*
+
+![La paciente revoca el consentimiento otorgado](capturas/83_consent_paciente_revocar_200.png)
+
+*`POST /consent-requests/{id}/revoke` — `200`, `"status": "revoked"`, con `revokedAt` registrado. La máquina de estados completa (`pending → granted → revoked`) quedó verificada de punta a punta.*
+
+### 14.6 Estado de la Fase 5
 
 | Hito | Contenido | Estado |
 |---|---|---|
@@ -1705,7 +1740,7 @@ Reutiliza el método `label()` que ya existía en `MedicalSessionStatus` desde F
 | 5.1 | Catálogo de Pictogramas — categorías, severidad semántica, RBAC verificado | ✅ |
 | 5.2 | `ChatMessage` — chat con derivación de identidad desde el backend, verificado con evidencia real | ✅ |
 | 5.3 | Mensajes de sistema — retrofit de S4/S5 de Fase 4, verificado con evidencia real | ✅ |
-| 5.4 | `Consent` — consentimientos del paciente | ⏳ Pendiente |
+| 5.4 | `Consent` — consentimientos con máquina de estados y autonomía del paciente, verificado con evidencia real | ✅ |
 | 5.5 | Cascada de cierre completa (revocar consents + expirar CTA + mensaje de sistema) | ⏳ Pendiente |
 
 ---
@@ -1778,5 +1813,5 @@ Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluado
 
 <p align="center">
   <sub>Informe de evidencias — Proyecto <strong>SeñaVida</strong> · Backend API REST · Instituto Profesional San Sebastián</sub><br/>
-  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4 completa (Hitos 1–4) · Sección 14: Fase 5 en curso (Hitos 5.0–5.3) · Siguiente: Hito 5.4 — Consent</sub>
+  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4 completa (Hitos 1–4) · Sección 14: Fase 5 en curso (Hitos 5.0–5.4) · Siguiente: Hito 5.5 — cascada de cierre completa</sub>
 </p>
