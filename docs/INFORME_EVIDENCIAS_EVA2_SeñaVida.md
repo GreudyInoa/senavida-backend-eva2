@@ -67,7 +67,8 @@
 14. [Fase 5 — Chat y Consentimientos (en curso)](#14-fase-5--chat-y-consentimientos-en-curso)
     - 14.1 Hito 5.0 — Acceso del paciente (token derivado del CTA)
     - 14.2 Hito 5.1 — Catálogo de Pictogramas
-    - 14.3 Hito 5.2 — `ChatMessage`: el chat de la atención · 14.4 Estado de la fase
+    - 14.3 Hito 5.2 — `ChatMessage`: el chat de la atención
+    - 14.4 Hito 5.3 — Mensajes de sistema · 14.5 Estado de la fase
 
 **Cierre**
 
@@ -1657,14 +1658,53 @@ El cliente nunca envía `senderType`, `senderId`, `senderName` ni `origin` — e
 
 *`POST /messages/{id}/read` sobre el mensaje de la paciente, con el token del médico — `200`, con `"status": "read"`. Confirma que el personal de salud puede marcar como leídos los mensajes de la conversación.*
 
-### 14.4 Estado de la Fase 5
+### 14.4 Hito 5.3 — Mensajes de sistema: pagando la deuda de Fase 4
+
+**El problema.** Desde el diseño de la Fase 5 quedó declarada una deuda: los endpoints `PATCH /medical-sessions/{id}/stage` y `POST /medical-sessions/{id}/close` (construidos en Fase 4, Hito 3) debían insertar automáticamente un mensaje en el chat cada vez que la atención cambiara de etapa — pero `ChatMessage` no existía todavía en ese momento. Sin esto, el paciente vería su conversación congelada mientras, en la trastienda, su atención avanza de Admisión a Categorización a Consulta Médica.
+
+**Resolución adoptada:** un servicio único, `SystemMessageService`, enganchado en los tres puntos donde una atención cambia de estado:
+
+```php
+SystemMessageService::create(
+    $medicalSession,
+    "La atencion avanzo a {$siguienteEtapa->label()}."
+);
+```
+
+Reutiliza el método `label()` que ya existía en `MedicalSessionStatus` desde Fase 4, en vez de duplicar el texto de cada etapa como strings sueltos. Para el salto de emergencia, el mensaje es deliberadamente neutro (*"por criterio de emergencia"*), sin repetir el motivo clínico interno (`triage_skip_reason`) — ese detalle queda reservado al registro médico, no al chat del paciente.
+
+**Verificación con evidencia real**, sobre la misma sesión ya usada en el Hito 5.2 (con mensajes previos de un médico y una paciente):
+
+![Avance de etapa vía PATCH /stage](capturas/78_sysmsg_patch_stage_200.png)
+
+*`PATCH /medical-sessions/{id}/stage` con un usuario de Admisión — `200`, la sesión avanzó de `in_admission` a `in_triage`.*
+
+![Historial de mensajes tras el avance](capturas/79_sysmsg_get_messages_200.png)
+
+*`GET /medical-sessions/{id}/messages` sobre la misma sesión inmediatamente después. Al final del historial, sin que nadie lo escribiera manualmente, apareció:*
+
+```json
+{
+  "senderType": "system",
+  "senderId": null,
+  "senderName": "Sistema",
+  "messageType": "system",
+  "body": "La atencion avanzo a Categorización.",
+  "origin": "system",
+  "confirmedByPatientAt": null
+}
+```
+
+*El mensaje quedó mezclado cronológicamente con los mensajes humanos anteriores del médico y la paciente, confirmando que la deuda de Fase 4 se pagó correctamente.*
+
+### 14.5 Estado de la Fase 5
 
 | Hito | Contenido | Estado |
 |---|---|---|
 | 5.0 | Acceso del paciente — token derivado del CTA, segregación de identidad | ✅ |
 | 5.1 | Catálogo de Pictogramas — categorías, severidad semántica, RBAC verificado | ✅ |
 | 5.2 | `ChatMessage` — chat con derivación de identidad desde el backend, verificado con evidencia real | ✅ |
-| 5.3 | Mensajes de sistema (retrofit de los hitos S4/S5 de Fase 4) | ⏳ Pendiente |
+| 5.3 | Mensajes de sistema — retrofit de S4/S5 de Fase 4, verificado con evidencia real | ✅ |
 | 5.4 | `Consent` — consentimientos del paciente | ⏳ Pendiente |
 | 5.5 | Cascada de cierre completa (revocar consents + expirar CTA + mensaje de sistema) | ⏳ Pendiente |
 
@@ -1738,5 +1778,5 @@ Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluado
 
 <p align="center">
   <sub>Informe de evidencias — Proyecto <strong>SeñaVida</strong> · Backend API REST · Instituto Profesional San Sebastián</sub><br/>
-  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4 completa (Hitos 1–4) · Sección 14: Fase 5 en curso (Hitos 5.0–5.2) · Siguiente: Hito 5.3 — mensajes de sistema</sub>
+  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4 completa (Hitos 1–4) · Sección 14: Fase 5 en curso (Hitos 5.0–5.3) · Siguiente: Hito 5.4 — Consent</sub>
 </p>
