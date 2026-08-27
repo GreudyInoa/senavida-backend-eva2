@@ -7,7 +7,8 @@
   <img src="https://img.shields.io/badge/Sanctum-Bearer%20Token-2E7D32?style=flat-square" alt="Sanctum"/>
   <img src="https://img.shields.io/badge/Swagger-OpenAPI%203.0-85EA2D?style=flat-square&logo=swagger&logoColor=black" alt="Swagger OpenAPI 3.0"/>
   <img src="https://img.shields.io/badge/Rúbrica-100%2F100-brightgreen?style=flat-square" alt="Rúbrica 100/100"/>
-  <img src="https://img.shields.io/badge/Fase%204-COMPLETA%20(Hitos%201--4)-2E7D32?style=flat-square" alt="Fase 4 completa"/>
+  <img src="https://img.shields.io/badge/Fase%205-COMPLETA-2E7D32?style=flat-square" alt="Fase 5 completa"/>
+  <img src="https://img.shields.io/badge/Fase%206-Hito%206.0%20completo-1976D2?style=flat-square" alt="Fase 6 en progreso"/>
 </p>
 
 > Evidencia completa de funcionamiento del backend de **SeñaVida**, probada endpoint por endpoint con **Postman** y **Swagger UI**, y verificada a nivel de base de datos con **Tinker**. Este documento acompaña la entrega del **EVA2** y demuestra, con capturas reales (no simuladas), que el proyecto cumple cada indicador de la rúbrica.
@@ -22,7 +23,7 @@
 | 🔗 **Repositorio** | [`GreudyInoa/senavida-backend-eva2`](https://github.com/GreudyInoa/senavida-backend-eva2) |
 | ⚙️ **Stack** | Laravel 13 · PHP 8.4 · PostgreSQL · Laravel Sanctum |
 | 📅 **Entrega EVA2** | 17 de agosto de 2026 |
-| 🔄 **Última actualización** | 25 de agosto de 2026 — Fase 4 **completa** (Hitos 1–4) |
+| 🔄 **Última actualización** | 27 de agosto de 2026 — Fase 6, Hito 6.0 **completo** (CRUD de Pictogramas) |
 
 ---
 
@@ -72,10 +73,15 @@
     - 14.5 Hito 5.4 — `Consent`: el sistema de consentimientos
     - 14.6 Hito 5.5 — Cascada de cierre completa · 14.7 Estado de la fase
 
+**Fase 6 — en curso**
+
+15. [Fase 6 — Administración (en progreso)](#15-fase-6--administración-en-progreso)
+    - 15.1 Hito 6.0 — CRUD completo de Pictogramas (5 bugs encontrados y corregidos)
+
 **Cierre**
 
-15. [Cumplimiento de la rúbrica](#15-cumplimiento-de-la-rúbrica)
-16. [Glosario rápido](#16-glosario-rápido)
+16. [Cumplimiento de la rúbrica](#16-cumplimiento-de-la-rúbrica)
+17. [Glosario rápido](#17-glosario-rápido)
 
 ---
 
@@ -1782,7 +1788,85 @@ ChatMessage → sender_type: "system" | body: "La atencion fue cerrada." | sent_
 
 ---
 
-## 15. Cumplimiento de la rúbrica
+## 15. Fase 6 — Administración (en progreso)
+
+> 💡 **De qué trata esta fase.** La Fase 5 dejó el catálogo de pictogramas congelado a propósito: se necesitaba primero que el chat funcionara como consumidor de ese catálogo, antes de construir quién lo administra. La Fase 6 cierra esa deuda y agrega, en general, todo lo que un administrador institucional necesita para operar el sistema día a día sin tocar la base de datos directamente.
+
+### 15.1 Hito 6.0 — CRUD completo de Pictogramas
+
+**El problema.** Desde el Hito 5.1, el catálogo de pictogramas solo se podía leer y crear — no existía forma de editar parcialmente, desactivar, ni administrar categorías. Además, una revisión de código detectó que el único endpoint de edición (`PATCH /pictograms/{id}`) reutilizaba el `FormRequest` de creación, con reglas `required` en todos los campos — lo que rompe la semántica de una actualización parcial (`PATCH` según el estándar HTTP).
+
+**Bugs encontrados y corregidos durante la construcción de este hito:**
+
+| # | Bug | Causa | Corrección |
+|---|---|---|---|
+| 1 | `PATCH` exigía todos los campos | `update()` reutilizaba `StorePictogramRequest` (reglas `required`) | Se creó `UpdatePictogramRequest` con reglas `sometimes` |
+| 2 | `TypeError` fatal si un paciente listaba pictogramas | `viewAny(User $user)` llevaba type-hint estricto, pero un `Patient` no es instancia de `User` | Se quitó el type-hint: `viewAny($user)` |
+| 3 | `Call to undefined method ...::validate()` | Laravel 11+ ya no incluye el trait `ValidatesRequests` por defecto en el controller base | Se reemplazó por `Validator::make(...)->validate()` explícito |
+| 4 | Swagger no mostraba el campo de body en varios endpoints | Faltaba la anotación `requestBody` en las rutas `PATCH`/`POST` de categorías | Se agregó `requestBody` a cada anotación `#[OA\...]` correspondiente |
+| 5 | Una categoría nueva se creaba con `isActive: null` | `is_active` no estaba en `$fillable` del modelo `PictogramCategory` — Laravel descarta silenciosamente cualquier columna fuera de esa lista blanca | Se agregó `is_active` a `$fillable` y un `cast` a `boolean` |
+
+Ninguno de estos bugs llegó a producción sin probarse: cada uno se detectó ejecutando el endpoint real desde Swagger, no leyendo el código en silencio.
+
+**Endpoints nuevos construidos:**
+
+| Endpoint | Verbo | Novedad |
+|---|---|---|
+| `/pictograms` | `GET` | Ahora soporta `search`, `sort` (con desempate determinista por `id`) e `includeInactive` |
+| `/pictograms/{id}` | `PATCH` | Corregido: actualización realmente parcial |
+| `/pictograms/{id}` | `DELETE` | Nuevo — desactiva (`is_active = false`), nunca borra de la base de datos |
+| `/pictograms/{id}/restore` | `PATCH` | Nuevo — reactiva |
+| `/pictogram-categories` | `POST` | Nuevo — crear categoría |
+| `/pictogram-categories/{id}` | `PATCH` | Nuevo — editar parcialmente |
+| `/pictogram-categories/{id}` | `DELETE` | Nuevo — desactivar |
+| `/pictogram-categories/{id}/restore` | `PATCH` | Nuevo — reactivar |
+
+**Por qué "eliminar" es desactivar y no borrar.** Un pictograma o una categoría puede estar referenciado por mensajes de chat de atenciones ya cerradas. Borrar la fila de la base de datos dejaría esas referencias rotas — el historial clínico-legal de una atención no puede mostrar "pictograma eliminado". Se aplicó el mismo criterio ya usado en Organizaciones, Centros y Unidades desde la Fase 4: `is_active = false` en vez de `DELETE FROM`.
+
+**Evidencia de ejecución real, desde Swagger:**
+
+![Creación de un pictograma](capturas/85_pictograms_crear_201.png)
+
+*`POST /pictograms` con el token de `admin_institucional` — `201 Created`. Pictograma de prueba, eliminado tras la verificación.*
+
+![Actualización parcial real](capturas/86_pictograms_patch_parcial_200.png)
+
+*`PATCH /pictograms/{id}` enviando **únicamente** `{"isActive": false}` — `200 OK`, sin exigir `title`, `phrase`, `emoji` ni el resto de los campos. Esta es la evidencia central del hito: confirma en ejecución que el bug de la actualización parcial quedó corregido.*
+
+![Búsqueda por texto](capturas/87_pictograms_search_dolor_200.png)
+
+*`GET /pictograms?search=dolor` — devuelve únicamente los pictogramas cuyo título o frase contienen el término, excluyendo automáticamente los inactivos.*
+
+![Bloqueo de rol para Super Admin](capturas/88_pictograms_crear_forbidden_super_admin_403.png)
+
+*`POST /pictograms` con el token de **Super Admin** — `403 FORBIDDEN_ROLE`. Confirma, igual que en el Hito 5.1, que la gestión del catálogo es exclusiva de `admin_institucional`.*
+
+![Validación de nombre duplicado en categorías](capturas/89_pictogram_categories_duplicada_422.png)
+
+*`POST /pictogram-categories` con un nombre ya existente ("Dolor") — `422 Unprocessable Content`, regla `unique` aplicada correctamente.*
+
+![Creación de una categoría](capturas/90_pictogram_categories_crear_201.png)
+
+*`POST /pictogram-categories` — `201 Created` con `isActive: true`. Esta captura corresponde a la ejecución **posterior** a la corrección del bug 5 (`$fillable`); antes de la corrección, el mismo endpoint devolvía `isActive: null`.*
+
+![Desactivación de una categoría](capturas/91_pictogram_categories_desactivar_200.png)
+
+*`DELETE /pictogram-categories/{id}` — `200 OK`, `isActive: false`. La categoría no se borra de la base de datos.*
+
+![Reactivación de una categoría](capturas/92_pictogram_categories_restaurar_200.png)
+
+*`PATCH /pictogram-categories/{id}/restore` — `200 OK`, `isActive: true`. Ciclo completo de desactivar/reactivar verificado.*
+
+**Estado del catálogo tras la verificación:** los registros de prueba ("Dolor de prueba", "Categoria de prueba") fueron eliminados definitivamente por Tinker una vez concluidas las pruebas, dejando el catálogo en su estado real de **9 pictogramas y 4 categorías**, verificado con:
+
+```php
+Pictogram::count(); // 9
+PictogramCategory::count(); // 4
+```
+
+---
+
+## 16. Cumplimiento de la rúbrica
 
 Esta tabla resume cómo cada indicador de la rúbrica queda cubierto por las evidencias de este informe.
 
@@ -1812,7 +1896,7 @@ El trabajo documentado en este informe excede los tres indicadores mínimos. Las
 
 ---
 
-## 16. Glosario rápido
+## 17. Glosario rápido
 
 Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluador que quiera repasar los términos técnicos):
 

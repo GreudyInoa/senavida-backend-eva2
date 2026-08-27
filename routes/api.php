@@ -1,4 +1,5 @@
 <?php
+
 use App\Http\Controllers\Api\V1\Auth\PatientAccessController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChatMessageController;
@@ -86,6 +87,13 @@ Route::prefix('v1')->group(function () {
 
         Route::post('/pictograms', [PictogramController::class, 'store']);
         Route::patch('/pictograms/{pictogram}', [PictogramController::class, 'update']);
+        Route::delete('/pictograms/{pictogram}', [PictogramController::class, 'destroy']);
+        Route::patch('/pictograms/{pictogram}/restore', [PictogramController::class, 'restore']);
+
+        Route::post('/pictogram-categories', [PictogramCategoryController::class, 'store']);
+        Route::patch('/pictogram-categories/{pictogramCategory}', [PictogramCategoryController::class, 'update']);
+        Route::delete('/pictogram-categories/{pictogramCategory}', [PictogramCategoryController::class, 'destroy']);
+        Route::patch('/pictogram-categories/{pictogramCategory}/restore', [PictogramCategoryController::class, 'restore']);
 
         Route::post('/medical-sessions', [MedicalSessionController::class, 'store']);
         Route::get('/medical-sessions/active', [MedicalSessionController::class, 'active']);
