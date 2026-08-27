@@ -64,12 +64,13 @@
 
 **Fase 5 — en curso**
 
-14. [Fase 5 — Chat y Consentimientos (en curso)](#14-fase-5--chat-y-consentimientos-en-curso)
+14. [Fase 5 — Chat y Consentimientos (completa)](#14-fase-5--chat-y-consentimientos-completa)
     - 14.1 Hito 5.0 — Acceso del paciente (token derivado del CTA)
     - 14.2 Hito 5.1 — Catálogo de Pictogramas
     - 14.3 Hito 5.2 — `ChatMessage`: el chat de la atención
     - 14.4 Hito 5.3 — Mensajes de sistema
-    - 14.5 Hito 5.4 — `Consent`: el sistema de consentimientos · 14.6 Estado de la fase
+    - 14.5 Hito 5.4 — `Consent`: el sistema de consentimientos
+    - 14.6 Hito 5.5 — Cascada de cierre completa · 14.7 Estado de la fase
 
 **Cierre**
 
@@ -1550,7 +1551,7 @@ La causa: `$fillable` es una **lista blanca**. Eloquent solo acepta de un `creat
 
 ---
 
-## 14. Fase 5 — Chat y Consentimientos (en curso)
+## 14. Fase 5 — Chat y Consentimientos (completa)
 
 > 💡 **El núcleo comunicacional del producto.** Esta fase construye el canal de mensajes de la atención (chat) y el sistema de permisos del paciente (consentimientos). Antes de tocar esas dos entidades, fue necesario resolver dos prerrequisitos que el propio contrato dejaba pendientes: **cómo se autentica un paciente** (A-03, decidido pero no implementado) y **de dónde salen los pictogramas** que el chat va a usar.
 
@@ -1732,7 +1733,41 @@ Cada transición (`approve`, `reject`, `revoke`) valida su propio estado de orig
 
 *`POST /consent-requests/{id}/revoke` — `200`, `"status": "revoked"`, con `revokedAt` registrado. La máquina de estados completa (`pending → granted → revoked`) quedó verificada de punta a punta.*
 
-### 14.6 Estado de la Fase 5
+### 14.6 Hito 5.5 — Cascada de cierre completa: el último hito de la fase
+
+**El problema.** Cerrar una atención debía ser una única operación atómica, pero hasta este hito eran llamadas sueltas: se actualizaba el estado y se revocaba el token del paciente, y por separado se generaba el mensaje de sistema. Faltaban además dos efectos exigidos por el diseño de la fase: revocar los consentimientos que siguieran vigentes y expirar el CTA asociado. Sin esto, una atención podía cerrarse dejando "vivo" un permiso para compartir datos clínicos.
+
+**Resolución adoptada:** el método `closeSession()` del modelo `MedicalSession` se reescribió para envolver cinco efectos dentro de una sola transacción — si cualquiera falla, PostgreSQL deshace todos:
+
+```php
+DB::transaction(function () use (...) {
+    $this->update([...]);                       // estado de la sesión
+    $this->patient->tokens()->delete();          // acceso del paciente
+    $this->consents()->where('status', 'granted')->get()->each(...); // revoca consents
+    $this->temporaryAccessCode?->update(['status' => 'expired']);     // expira el CTA
+    SystemMessageService::create($this, 'La atencion fue cerrada.');  // deja constancia
+});
+```
+
+Para "expirar" el CTA no fue necesario agregar ningún valor nuevo al enum: `'expired'` ya existía en `temporary_access_codes.status` desde el Hito 2 de Fase 4 — se reutilizó el mismo significado en un contexto distinto, evitando duplicar la semántica del estado.
+
+**Verificación con evidencia real de la transacción completa.** Se preparó un consentimiento en estado `granted` sobre una atención ya usada en hitos anteriores, y se cerró vía `POST /medical-sessions/{id}/close`:
+
+![Cierre de la atención](capturas/84_cierre_close_200.png)
+
+*`POST /medical-sessions/{id}/close` — `200`, `"status": "closed"`, `"isWritable": false`.*
+
+Inmediatamente después, se consultaron directamente en base de datos los tres efectos nuevos:
+
+```
+Consent   → status: "revoked"   | evidence: {"reason": "session_closed"} | revoked_at: 15:25:04
+CTA       → status: "expired"
+ChatMessage → sender_type: "system" | body: "La atencion fue cerrada." | sent_at: 15:25:04
+```
+
+*Nota especialmente relevante: los tres timestamps —`revoked_at` del consentimiento, `ended_at` de la sesión, y `sent_at` del mensaje de sistema— resultaron exactamente el mismo instante, confirmando que ocurrieron dentro de la misma transacción atómica y no como pasos secuenciales independientes.*
+
+### 14.7 Estado de la Fase 5 — completa
 
 | Hito | Contenido | Estado |
 |---|---|---|
@@ -1741,7 +1776,9 @@ Cada transición (`approve`, `reject`, `revoke`) valida su propio estado de orig
 | 5.2 | `ChatMessage` — chat con derivación de identidad desde el backend, verificado con evidencia real | ✅ |
 | 5.3 | Mensajes de sistema — retrofit de S4/S5 de Fase 4, verificado con evidencia real | ✅ |
 | 5.4 | `Consent` — consentimientos con máquina de estados y autonomía del paciente, verificado con evidencia real | ✅ |
-| 5.5 | Cascada de cierre completa (revocar consents + expirar CTA + mensaje de sistema) | ⏳ Pendiente |
+| 5.5 | Cascada de cierre completa — verificado con evidencia real de atomicidad | ✅ |
+
+**Fase 5 — Chat y Consentimientos — completa.** Los seis hitos definidos están construidos, probados con evidencia HTTP real, y documentados.
 
 ---
 
@@ -1813,5 +1850,5 @@ Para quien lea este informe sin ser parte del proyecto (por ejemplo, un evaluado
 
 <p align="center">
   <sub>Informe de evidencias — Proyecto <strong>SeñaVida</strong> · Backend API REST · Instituto Profesional San Sebastián</sub><br/>
-  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4 completa (Hitos 1–4) · Sección 14: Fase 5 en curso (Hitos 5.0–5.4) · Siguiente: Hito 5.5 — cascada de cierre completa</sub>
+  <sub>Secciones 1–5: entrega EVA2 · Secciones 6–13: Fase 4 completa (Hitos 1–4) · Sección 14: Fase 5 completa (Hitos 5.0–5.5) · Siguiente: Fase 6 — Administración</sub>
 </p>

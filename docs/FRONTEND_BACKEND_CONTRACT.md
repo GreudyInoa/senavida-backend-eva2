@@ -2,10 +2,40 @@
 
 **Proyecto:** SEÑAVIDA — Plataforma de comunicación inclusiva en salud
 **Documento:** Contrato oficial Frontend ↔ Backend
-**Versión del contrato:** `2.5.0` — arquitectura **API REST**
+**Versión del contrato:** `2.6.0` — arquitectura **API REST**
 **Estado:** Vigente. Decisiones de arquitectura ratificadas por el equipo y el docente (ver §Decisiones de arquitectura).
 **Fuente:** `BACKEND_IMPLEMENTATION_GUIDE.md` — auditoría del frontend en el commit `41360a8`
-**Fecha:** 2026-08-25 (actualizado v2.5.0)
+**Fecha:** 2026-08-27 (actualizado v2.6.0)
+
+> **Cambios en v2.6.0 — Fase 5 (Chat y Consentimientos) completa:**
+> - **A-03 RESUELTO E IMPLEMENTADO.** El paciente se autentica canjeando su
+>   propio CTA por un token de Sanctum acotado únicamente a la atención que lo
+>   emitió (`ability: "session:{id}"`). Se valida contra `medical_sessions`, no
+>   contra `temporary_access_codes` (el código ya quedó `consumed` al abrir la
+>   atención en S1) — el mismo código pasa de "abrir la puerta" a "identificar
+>   mi conversación actual". El token se revoca automáticamente al cerrar la
+>   atención.
+> - **E12 `ChatMessage` IMPLEMENTADO Y VERIFICADO.** Los cuatro endpoints
+>   construidos, con la regla de identidad vinculante cumplida en ejecución: el
+>   backend deriva emisor y origen del token autenticado, nunca del body de la
+>   petición.
+> - **E13/E14 `Pictogram`/`PictogramCategory` IMPLEMENTADOS Y VERIFICADOS.**
+>   Ambas correcciones obligatorias resueltas: símbolo como dato propio, color
+>   como token semántico. `super_admin` deliberadamente excluido de la gestión
+>   del catálogo, verificado con `403` en ejecución.
+> - **E11 `Consent` IMPLEMENTADO Y VERIFICADO — D-08 RESUELTO.** Título y
+>   descripción generados desde plantillas en servidor. Máquina de estados con
+>   transiciones controladas en el modelo. Regla de autonomía verificada en
+>   ejecución: el médico que solicita un consentimiento no puede responderlo
+>   (`403`), solo el paciente dueño de la atención.
+> - **Mensajes de sistema retroactivos.** `PATCH /stage` y `POST /close`
+>   (Fase 4) ahora generan automáticamente un `ChatMessage` de tipo `system` en
+>   cada transición — deuda declarada en el diseño original de E12, saldada.
+> - **Cascada de cierre atómica.** `closeSession()` envuelve en una única
+>   transacción: actualización de estado, revocación del token del paciente,
+>   revocación de todo `Consent` en estado `granted`, expiración del CTA
+>   asociado, y el mensaje de sistema de cierre. Verificado en ejecución que
+>   los cinco efectos ocurren en el mismo instante.
 
 > **Cambios en v2.5.0:**
 > - **E10 `MedicalSession` IMPLEMENTADO Y VERIFICADO.** Los cinco endpoints
@@ -1563,6 +1593,32 @@ ContactMessage      (público, fuera del dominio clínico)
 > `DECISIÓN PENDIENTE — D-08`: ¿el título y la descripción se almacenan como
 > texto, o se generan desde plantillas a partir del tipo y sus parámetros?
 
+> **✅ D-08 RESUELTO — IMPLEMENTADO Y VERIFICADO (2026-08-27).** El título y la
+> descripción se generan desde **plantillas fijas en un enum de PHP**
+> (`ConsentType::title()` / `description()`), nunca se almacenan como texto
+> libre. El personal no puede escribir ese contenido; se calcula al servir la
+> respuesta. La corrección obligatoria sobre la referencia al contacto también
+> quedó resuelta: `patient_contact_id` es una FK real hacia `PatientContact`,
+> verificada además contra el paciente de la atención antes de aceptar la
+> solicitud (evita autorizar el envío de datos a un contacto ajeno a esa
+> atención, aunque el UUID exista en la base de datos).
+>
+> **Máquina de estados verificada:** `pending → granted|rejected`, y desde
+> `granted → revoked`. Cada transición valida su estado de origen dentro del
+> propio modelo, no en el controlador.
+>
+> **Regla de autonomía verificada en ejecución, no solo en diseño.** Se probó
+> que el mismo médico que solicitó un consentimiento **no puede aprobarlo**:
+> `403 WRONG_TOKEN_TYPE`, bloqueado por el middleware antes de que la Policy se
+> evalúe. Solo el paciente dueño de la atención puede aprobar, rechazar o
+> revocar — verificado también que un consentimiento `rejected` no admite
+> revocación (solo se revoca lo que antes se otorgó).
+>
+> **Alcance de `consentType` reducido a propósito.** El enum documenta los 11
+> valores, pero solo 4 (`start_care`, `clinical_data`, `camera`,
+> `share_with_contacts`) se aceptan hoy en las solicitudes — el resto queda
+> documentado sin productor real, mismo criterio aplicado en E12.
+
 ---
 
 #### E12 · `ChatMessage` 🟦🟩
@@ -1583,6 +1639,39 @@ ContactMessage      (público, fuera del dominio clínico)
 > traducciones de señas **DEBE** persistirse y el tipo de mensaje **DEBE** ser el
 > correspondiente, no texto genérico.
 
+> **✅ IMPLEMENTADO Y VERIFICADO (2026-08-26–27).**
+>
+> **Regla de identidad verificada en ejecución, no solo en diseño.** El backend
+> deriva `senderType`, `senderId`, `senderName` y `origin` mirando quién está
+> autenticado (`instanceof Patient` vs `User`); el `FormRequest` de creación ni
+> siquiera valida esos campos, así que cualquier valor que el cliente intente
+> enviar se ignora por completo. Se probó con un médico y con la paciente
+> dueña de la atención enviando mensajes reales: ambas respuestas mostraron los
+> valores correctos y distintos, sin que el body de la petición los incluyera.
+>
+> **`pictogramId` como referencia real,** hacia el catálogo construido en E13 —
+> con el objeto `pictogram` anidado (`id`, `title`, `emoji`) cuando aplica,
+> eliminando la necesidad del switch hardcodeado que señalaba el hallazgo
+> original.
+>
+> **Alcance reducido a propósito en `messageType`/`origin`/`status`.** Se
+> documentan los valores completos del contrato, pero solo se producen los que
+> el sistema puede generar hoy: `text`, `quick_message`, `pictogram`, `system`
+> para el tipo; `sent`, `read` para el estado (`delivered` requiere
+> broadcasting en tiempo real, no implementado todavía). `gesture_prediction` y
+> el origen `interpreter` quedan documentados sin productor real.
+>
+> **Mensajes de sistema retroactivos.** `PATCH /medical-sessions/{id}/stage` y
+> `POST /medical-sessions/{id}/close` (construidos en Fase 4, antes de que esta
+> entidad existiera) ahora insertan automáticamente un `ChatMessage` de tipo
+> `system` en cada transición de etapa y al cerrar la atención — pagando la
+> deuda declarada en el diseño original de esta entidad. Verificado en
+> ejecución: el mensaje aparece en el historial cronológico sin que ningún
+> humano lo escriba.
+>
+> **Paginación por cursor**, no por número de página, ya que un chat que crece
+> mientras se lee vuelve inconsistente el offset numérico.
+
 ---
 
 #### E13 · `Pictogram` 🟦
@@ -1600,6 +1689,16 @@ ContactMessage      (público, fuera del dominio clínico)
 >    genérico**. Esto anula la función del mantenedor.
 > 2. El color **NO DEBE** transportarse como clases de estilo. Se transporta un
 >    token semántico de severidad y el frontend decide su representación.
+
+> **✅ IMPLEMENTADO Y VERIFICADO (2026-08-26).** Las dos correcciones
+> obligatorias quedaron resueltas: `emoji` es una columna propia de la entidad
+> (dato, no código), y `severity` es un enum de 4 valores (`critical`,
+> `warning`, `info`, `neutral`) — un token semántico, nunca una clase de
+> Tailwind. `super_admin` está deliberadamente excluido de la gestión de este
+> catálogo (solo `admin_institucional`), verificado en ejecución: incluso con
+> el token del rol de mayor alcance del sistema, `POST /pictograms` responde
+> `403 FORBIDDEN_ROLE`. El `GET` es accesible tanto a staff como a paciente,
+> ya que ambos necesitan el catálogo para construir mensajes.
 
 ---
 
@@ -2247,6 +2346,9 @@ ipAddress · userAgent
 >
 > Según se resuelva `D-08`, el título y la descripción se generan en el servidor
 > desde plantillas (recomendado) o se envían desde el cliente.
+>
+> **✅ D-08 RESUELTO.** Se generan en el servidor desde plantillas, como
+> recomendaba esta misma nota. Ver §6 E11 para el detalle de implementación.
 
 **`POST /medical-sessions/{id}/calls`**
 
@@ -3810,7 +3912,7 @@ en v2.5.0 (ver §20.7).
 | **D-01** | URL base y estrategia de entornos | Configuración de ambos equipos | §2.1 |
 | **D-05** | Catálogo real de ubicaciones por establecimiento | Convocatoria de pacientes | §6 E04 |
 | **D-06** | ¿Un rol por usuario o varios? | Modelo de autorización completo | §6 E06 |
-| **D-08** | ¿Título y descripción del consentimiento como texto almacenado o generado desde plantillas? | Contrato del recurso de consentimientos e internacionalización | §6 E11 |
+| **D-08** | ~~¿Título y descripción del consentimiento como texto almacenado o generado desde plantillas?~~ **RESUELTO: generado desde plantillas.** | Contrato del recurso de consentimientos e internacionalización | §6 E11 |
 | **D-11** | Proveedor de videollamada | Integración de intérprete remoto | §6 E21 |
 | **D-12** | Consentimientos exigidos para cámara y videollamada | Reglas de negocio del intérprete | §6 E21 |
 | **D-16** | ¿Puede `categorizacion` cerrar atenciones? El borrador de autorización dice que sí; la interfaz solo lo ofrece al médico | **Ratificado en la versión restrictiva (solo `MED`) e implementado así.** Queda abierto a ratificación docente | §7.6 |
