@@ -23,7 +23,7 @@
 | 🔗 **Repositorio** | [`GreudyInoa/senavida-backend-eva2`](https://github.com/GreudyInoa/senavida-backend-eva2) |
 | ⚙️ **Stack** | Laravel 13 · PHP 8.4 · PostgreSQL · Laravel Sanctum |
 | 📅 **Entrega EVA2** | 17 de agosto de 2026 |
-| 🔄 **Última actualización** | 27 de agosto de 2026 — Fase 6, Hito 6.0 **completo** (CRUD de Pictogramas) |
+| 🔄 **Última actualización** | 27 de agosto de 2026 — Fase 6, Hitos 6.0 y 6.1 **completos** (CRUD de Pictogramas + Gestión de usuarios) |
 
 ---
 
@@ -77,6 +77,7 @@
 
 15. [Fase 6 — Administración (en progreso)](#15-fase-6--administración-en-progreso)
     - 15.1 Hito 6.0 — CRUD completo de Pictogramas (5 bugs encontrados y corregidos)
+    - 15.2 Hito 6.1 — Gestión de usuarios (corrección de escalación de privilegios crítica)
 
 **Cierre**
 
@@ -1863,6 +1864,38 @@ Ninguno de estos bugs llegó a producción sin probarse: cada uno se detectó ej
 Pictogram::count(); // 9
 PictogramCategory::count(); // 4
 ```
+
+### 15.2 Hito 6.1 — Gestión de usuarios (corrección de escalación de privilegios)
+
+**El problema encontrado — vulnerabilidad crítica.** El endpoint `POST /users`, ya construido desde la Fase 0, validaba que el `role` solicitado fuera uno de los cinco valores válidos del sistema, pero **no verificaba si quien hacía la petición tenía permiso para otorgar ese rol en particular**. Solo se comprobaba que el `healthCenterId` correspondiera al propio centro del `admin_institucional`. La consecuencia: cualquier `admin_institucional`, con una cuenta legítima de su propio hospital, podía enviar `"role": "super_admin"` y crear una cuenta con el nivel de privilegio más alto de todo el sistema — o editar su propia cuenta para auto-ascenderse por el mismo camino.
+
+Esta categoría de vulnerabilidad está señalada explícitamente en `BACKEND_IMPLEMENTATION_GUIDE.md` §9.3 como **"Riesgo de escalamiento de privilegios (🔴 crítico)"**.
+
+**La corrección adoptada — roles estructurales vs. roles operativos.** Se estableció una separación de dos niveles, coherente con la que ya existía para pictogramas (Hito 5.1): `super_admin` y `admin_institucional` son roles **estructurales** (gestionan la plataforma); `admision`, `categorizacion` y `medico` son roles **operativos** (hacen el trabajo clínico diario). Un `admin_institucional` puede otorgar únicamente roles operativos; un `super_admin` puede otorgar cualquiera. La regla se implementó en la capa de validación (`StoreUserRequest`/`UpdateUserRequest`), calculando dinámicamente la lista de roles permitidos según quien hace la petición — no en la Policy, que solo decide si la acción en general está permitida, no qué valor de dato es aceptable.
+
+**Segunda protección — nadie cambia su propio rol.** Además de restringir qué roles se pueden otorgar, se bloqueó explícitamente que un usuario modifique su propio campo `role` desde `PUT /users/{id}`, cerrando la puerta de auto-ascenso incluso dentro de los límites de rol ya permitidos.
+
+**Evidencia de ejecución real, desde Swagger:**
+
+![Escalación de privilegios bloqueada](capturas/93_users_escalacion_bloqueada_422.png)
+
+*`POST /users` con el token de `admin_institucional`, solicitando `"role": "super_admin"` — `422 Unprocessable Content`, `"No tienes permiso para asignar ese rol."`. Esta es la evidencia central del hito: confirma en ejecución que la vulnerabilidad de escalación de privilegios quedó cerrada.*
+
+![Rol operativo permitido](capturas/94_users_rol_operativo_permitido_201.png)
+
+*Mismo endpoint, mismo `admin_institucional`, solicitando `"role": "medico"` — `201 Created`. Confirma que la restricción es específica al valor del rol, no un bloqueo general de la creación de usuarios.*
+
+![Auto-cambio de rol bloqueado](capturas/95_users_auto_cambio_rol_bloqueado_422.png)
+
+*`PUT /users/{id}` donde el `admin_institucional` intenta cambiar su **propio** rol a `super_admin` — `422`, con los dos mensajes de validación combinados: rol no autorizado para su nivel, y prohibición de auto-modificación.*
+
+![Edición de rol de otra persona permitida](capturas/96_users_editar_rol_otro_permitido_200.png)
+
+*`PUT /users/{id}` sobre **otro** usuario (no el propio admin), cambiando su rol a `categorizacion` — `200 OK`. Confirma que la protección de auto-modificación no bloquea la gestión legítima de terceros.*
+
+**Paginación y filtros del listado, según contrato §14.6 y §15.4.** `GET /users` ahora responde con el envoltorio `meta.pagination` (total, página actual, última página) y admite filtros por `role`, `healthCenterId`, `unitId`, `isActive`, además de `sort` (por defecto `name`). Verificado con `GET /users` (7 usuarios del propio centro, paginados de a 25) y `GET /users?role=medico` (2 resultados, ambos con `role: "medico"`).
+
+**Estado tras la verificación:** el usuario de prueba creado durante las pruebas (`enfermero.valido.prueba@test.com`) fue eliminado por Tinker al finalizar.
 
 ---
 

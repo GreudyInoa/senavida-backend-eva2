@@ -2,29 +2,44 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use OpenApi\Attributes as OA;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreUserRequest;
+use App\Http\Requests\UpdateUserRequest;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use OpenApi\Attributes as OA;
 
 class UserController extends Controller
 {
+    private const SORTABLE = [
+        'name'      => 'name',
+        'email'     => 'email',
+        'role'      => 'role',
+        'createdAt' => 'created_at',
+    ];
+
     /**
-     * Lista los usuarios visibles para quien hace la petición.
+     * Lista los usuarios visibles para quien hace la peticion.
      * super_admin ve todos; admin_institucional solo los de su propio centro.
      */
     #[OA\Get(
         path: '/users',
         summary: 'Listar usuarios',
-        description: 'Devuelve los usuarios visibles para quien hace la peticion. El super_admin ve todos; el admin_institucional solo los de su propio centro de salud.',
+        description: 'Devuelve los usuarios visibles para quien hace la peticion, paginados.',
         tags: ['Usuarios'],
         security: [['bearerAuth' => []]],
         parameters: [
-            new OA\Parameter(name: 'status', description: 'Filtrar por estado: active (por defecto), inactive, all', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['active', 'inactive', 'all'])),
+            new OA\Parameter(name: 'role', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'healthCenterId', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'unitId', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'isActive', in: 'query', required: false, schema: new OA\Schema(type: 'boolean')),
+            new OA\Parameter(name: 'sort', in: 'query', required: false, schema: new OA\Schema(type: 'string', example: 'name')),
+            new OA\Parameter(name: 'page', in: 'query', required: false, schema: new OA\Schema(type: 'integer')),
+            new OA\Parameter(name: 'perPage', in: 'query', required: false, schema: new OA\Schema(type: 'integer')),
         ],
         responses: [
-            new OA\Response(response: 200, description: 'Listado de usuarios'),
+            new OA\Response(response: 200, description: 'Listado paginado de usuarios'),
             new OA\Response(response: 401, description: 'No autenticado'),
             new OA\Response(response: 403, description: 'Sin permiso para listar usuarios'),
         ]
@@ -34,55 +49,75 @@ class UserController extends Controller
         $this->authorize('viewAny', User::class);
 
         $admin = $request->user();
-
         $query = User::query();
 
         if ($admin->role === 'admin_institucional') {
             $query->where('health_center_id', $admin->health_center_id);
         }
 
-        $status = $request->query('status', 'active');
-        if ($status === 'active') {
-            $query->where('is_active', true);
-        } elseif ($status === 'inactive') {
-            $query->where('is_active', false);
+        if ($request->filled('role')) {
+            $query->where('role', $request->query('role'));
+        }
+        if ($request->filled('healthCenterId')) {
+            $query->where('health_center_id', $request->query('healthCenterId'));
+        }
+        if ($request->filled('unitId')) {
+            $query->where('unit_id', $request->query('unitId'));
+        }
+        if ($request->has('isActive')) {
+            $query->where('is_active', $request->boolean('isActive'));
         }
 
-        $users = $query->get();
+        $this->applySort($query, $request->query('sort'));
+
+        $perPage = min(max((int) $request->query('perPage', 25), 1), 100);
+        $paginated = $query->paginate($perPage);
 
         return response()->json([
             'success' => true,
-            'data'    => $users->map(fn ($user) => [
-                'id'             => $user->id,
-                'name'           => $user->name,
-                'email'          => $user->email,
-                'role'           => $user->role,
-                'organizationId' => $user->organization_id,
-                'healthCenterId' => $user->health_center_id,
-                'unitId'         => $user->unit_id,
-                'isActive'       => $user->is_active,
-            ]),
+            'data'    => collect($paginated->items())->map(fn ($user) => $this->toArray($user)),
+            'meta'    => [
+                'pagination' => [
+                    'total'       => $paginated->total(),
+                    'count'       => $paginated->count(),
+                    'perPage'     => $paginated->perPage(),
+                    'currentPage' => $paginated->currentPage(),
+                    'lastPage'    => $paginated->lastPage(),
+                ],
+            ],
         ], 200);
     }
 
-    /**
-     * Devuelve el detalle de un usuario específico.
-     */
+    private function applySort($query, ?string $sortParam): void
+    {
+        $fields = $sortParam ? explode(',', $sortParam) : ['name'];
+
+        foreach ($fields as $field) {
+            $direction = 'asc';
+            if (str_starts_with($field, '-')) {
+                $direction = 'desc';
+                $field = substr($field, 1);
+            }
+
+            if (! array_key_exists($field, self::SORTABLE)) {
+                abort(400, "El campo de ordenamiento '{$field}' no es valido.");
+            }
+
+            $query->orderBy(self::SORTABLE[$field], $direction);
+        }
+
+        $query->orderBy('id', 'asc');
+    }
+
     #[OA\Get(
         path: '/users/{id}',
         summary: 'Ver un usuario',
-        description: 'Devuelve el detalle de un usuario. El admin_institucional solo puede ver usuarios de su propio centro.',
         tags: ['Usuarios'],
         security: [['bearerAuth' => []]],
         parameters: [
-            new OA\Parameter(name: 'id', description: 'UUID del usuario', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
         ],
-        responses: [
-            new OA\Response(response: 200, description: 'Datos del usuario'),
-            new OA\Response(response: 401, description: 'No autenticado'),
-            new OA\Response(response: 403, description: 'Sin permiso para ver este usuario'),
-            new OA\Response(response: 404, description: 'Usuario no encontrado'),
-        ]
+        responses: [new OA\Response(response: 200, description: 'Datos del usuario')]
     )]
     public function show(User $user): JsonResponse
     {
@@ -90,26 +125,14 @@ class UserController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => [
-                'id'             => $user->id,
-                'name'           => $user->name,
-                'email'          => $user->email,
-                'role'           => $user->role,
-                'organizationId' => $user->organization_id,
-                'healthCenterId' => $user->health_center_id,
-                'unitId'         => $user->unit_id,
-                'isActive'       => $user->is_active,
-            ],
+            'data'    => $this->toArray($user),
         ], 200);
     }
 
-    /**
-     * Registra un nuevo usuario (funcionario del sistema).
-     */
     #[OA\Post(
         path: '/users',
         summary: 'Registrar un nuevo usuario',
-        description: 'Crea un usuario del personal de salud. Solo super_admin o admin_institucional pueden hacerlo, y admin_institucional unicamente dentro de su propio centro de salud. La contrasena se cifra automaticamente con bcrypt.',
+        description: 'Crea un usuario del personal de salud. admin_institucional solo puede otorgar roles operativos (admision, categorizacion, medico); super_admin puede otorgar cualquiera.',
         tags: ['Usuarios'],
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(
@@ -117,11 +140,11 @@ class UserController extends Controller
             content: new OA\JsonContent(
                 required: ['name', 'email', 'password', 'password_confirmation', 'role', 'organizationId', 'healthCenterId', 'unitId'],
                 properties: [
-                    new OA\Property(property: 'name', type: 'string', example: 'Enfermera de Prueba'),
-                    new OA\Property(property: 'email', type: 'string', format: 'email', example: 'enfermera@test.com'),
-                    new OA\Property(property: 'password', type: 'string', format: 'password', example: 'password123'),
-                    new OA\Property(property: 'password_confirmation', type: 'string', format: 'password', example: 'password123'),
-                    new OA\Property(property: 'role', type: 'string', enum: ['super_admin', 'admin_institucional', 'admision', 'categorizacion', 'medico'], example: 'categorizacion'),
+                    new OA\Property(property: 'name', type: 'string'),
+                    new OA\Property(property: 'email', type: 'string', format: 'email'),
+                    new OA\Property(property: 'password', type: 'string', format: 'password'),
+                    new OA\Property(property: 'password_confirmation', type: 'string', format: 'password'),
+                    new OA\Property(property: 'role', type: 'string', enum: ['super_admin', 'admin_institucional', 'admision', 'categorizacion', 'medico']),
                     new OA\Property(property: 'organizationId', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'healthCenterId', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'unitId', type: 'string', format: 'uuid'),
@@ -130,26 +153,14 @@ class UserController extends Controller
         ),
         responses: [
             new OA\Response(response: 201, description: 'Usuario creado correctamente'),
-            new OA\Response(response: 401, description: 'No autenticado'),
-            new OA\Response(response: 403, description: 'Sin permiso, o intento de crear fuera del propio centro'),
-            new OA\Response(response: 422, description: 'Datos invalidos o email duplicado'),
+            new OA\Response(response: 403, description: 'Sin permiso, o fuera del propio centro'),
+            new OA\Response(response: 422, description: 'Datos invalidos, email duplicado, o rol no autorizado'),
         ]
     )]
-    public function register(Request $request): JsonResponse
+    public function register(StoreUserRequest $request): JsonResponse
     {
-        $this->authorize('create', User::class);
-
         $admin = $request->user();
-
-        $data = $request->validate([
-            'name'             => ['required', 'string', 'max:255'],
-            'email'            => ['required', 'email', 'unique:users,email'],
-            'password'         => ['required', 'string', 'min:8', 'confirmed'],
-            'role'             => ['required', 'in:super_admin,admin_institucional,admision,categorizacion,medico'],
-            'organizationId'   => ['required', 'uuid', 'exists:organizations,id'],
-            'healthCenterId'   => ['required', 'uuid', 'exists:health_centers,id'],
-            'unitId'           => ['required', 'uuid', 'exists:units,id'],
-        ]);
+        $data = $request->validated();
 
         if ($admin->role === 'admin_institucional' && $data['healthCenterId'] !== $admin->health_center_id) {
             return response()->json([
@@ -159,109 +170,68 @@ class UserController extends Controller
         }
 
         $user = User::create([
-            'name'              => $data['name'],
-            'email'             => $data['email'],
-            'password'          => $data['password'],
-            'role'              => $data['role'],
-            'organization_id'   => $data['organizationId'],
-            'health_center_id'  => $data['healthCenterId'],
-            'unit_id'           => $data['unitId'],
-            'is_active'         => true,
+            'name'             => $data['name'],
+            'email'            => $data['email'],
+            'password'         => $data['password'],
+            'role'             => $data['role'],
+            'organization_id'  => $data['organizationId'],
+            'health_center_id' => $data['healthCenterId'],
+            'unit_id'          => $data['unitId'],
+            'is_active'        => true,
         ]);
 
         return response()->json([
             'success' => true,
-            'data'    => [
-                'user' => [
-                    'id'       => $user->id,
-                    'name'     => $user->name,
-                    'email'    => $user->email,
-                    'role'     => $user->role,
-                    'isActive' => $user->is_active,
-                ],
-            ],
+            'data'    => ['user' => $this->toArray($user)],
         ], 201);
     }
 
-    /**
-     * Actualiza los datos de un usuario existente.
-     */
     #[OA\Put(
         path: '/users/{id}',
         summary: 'Editar un usuario',
-        description: 'Actualiza los datos de un usuario. El admin_institucional solo puede editar usuarios de su propio centro.',
+        description: 'Actualiza parcialmente un usuario. Nadie puede cambiar su propio rol. admin_institucional solo puede otorgar roles operativos.',
         tags: ['Usuarios'],
         security: [['bearerAuth' => []]],
         parameters: [
-            new OA\Parameter(name: 'id', description: 'UUID del usuario', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
         ],
         requestBody: new OA\RequestBody(
             required: true,
             content: new OA\JsonContent(
                 properties: [
-                    new OA\Property(property: 'name', type: 'string', example: 'Enfermera Actualizada'),
-                    new OA\Property(property: 'email', type: 'string', format: 'email', example: 'nueva@test.com'),
+                    new OA\Property(property: 'name', type: 'string'),
+                    new OA\Property(property: 'email', type: 'string', format: 'email'),
                     new OA\Property(property: 'role', type: 'string', enum: ['super_admin', 'admin_institucional', 'admision', 'categorizacion', 'medico']),
-                    new OA\Property(property: 'password', type: 'string', format: 'password', example: 'nuevaClave123'),
-                    new OA\Property(property: 'password_confirmation', type: 'string', format: 'password', example: 'nuevaClave123'),
+                    new OA\Property(property: 'password', type: 'string', format: 'password'),
+                    new OA\Property(property: 'password_confirmation', type: 'string', format: 'password'),
                 ]
             )
         ),
         responses: [
             new OA\Response(response: 200, description: 'Usuario actualizado'),
-            new OA\Response(response: 401, description: 'No autenticado'),
-            new OA\Response(response: 403, description: 'Sin permiso para editar este usuario'),
-            new OA\Response(response: 404, description: 'Usuario no encontrado'),
-            new OA\Response(response: 422, description: 'Datos invalidos'),
+            new OA\Response(response: 422, description: 'Datos invalidos o rol no autorizado'),
         ]
     )]
-    public function update(Request $request, User $user): JsonResponse
+    public function update(UpdateUserRequest $request, User $user): JsonResponse
     {
-        $this->authorize('update', $user);
-
-        $data = $request->validate([
-            'name'     => ['sometimes', 'string', 'max:255'],
-            'email'    => ['sometimes', 'email', 'unique:users,email,'.$user->id],
-            'role'     => ['sometimes', 'in:super_admin,admin_institucional,admision,categorizacion,medico'],
-            'password' => ['sometimes', 'string', 'min:8', 'confirmed'],
-        ]);
-
-        $user->fill($data);
+        $user->fill($request->validated());
         $user->save();
 
         return response()->json([
             'success' => true,
-            'data'    => [
-                'id'             => $user->id,
-                'name'           => $user->name,
-                'email'          => $user->email,
-                'role'           => $user->role,
-                'organizationId' => $user->organization_id,
-                'healthCenterId' => $user->health_center_id,
-                'unitId'         => $user->unit_id,
-                'isActive'       => $user->is_active,
-            ],
+            'data'    => $this->toArray($user),
         ], 200);
     }
 
-    /**
-     * Desactiva un usuario (soft delete). No borra el registro.
-     */
     #[OA\Delete(
         path: '/users/{id}',
         summary: 'Desactivar un usuario',
-        description: 'Marca al usuario como inactivo (isActive=false). No elimina el registro de la base de datos.',
         tags: ['Usuarios'],
         security: [['bearerAuth' => []]],
         parameters: [
-            new OA\Parameter(name: 'id', description: 'UUID del usuario', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
         ],
-        responses: [
-            new OA\Response(response: 200, description: 'Usuario desactivado'),
-            new OA\Response(response: 401, description: 'No autenticado'),
-            new OA\Response(response: 403, description: 'Sin permiso, o intento de autodesactivacion'),
-            new OA\Response(response: 404, description: 'Usuario no encontrado'),
-        ]
+        responses: [new OA\Response(response: 200, description: 'Usuario desactivado')]
     )]
     public function destroy(User $user): JsonResponse
     {
@@ -272,31 +242,19 @@ class UserController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => [
-                'id'       => $user->id,
-                'isActive' => $user->is_active,
-            ],
+            'data'    => ['id' => $user->id, 'isActive' => $user->is_active],
         ], 200);
     }
 
-    /**
-     * Reactiva un usuario previamente desactivado.
-     */
     #[OA\Patch(
         path: '/users/{id}/restore',
         summary: 'Reactivar un usuario',
-        description: 'Marca al usuario como activo (isActive=true). El admin_institucional solo puede reactivar usuarios de su propio centro.',
         tags: ['Usuarios'],
         security: [['bearerAuth' => []]],
         parameters: [
-            new OA\Parameter(name: 'id', description: 'UUID del usuario', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
         ],
-        responses: [
-            new OA\Response(response: 200, description: 'Usuario reactivado'),
-            new OA\Response(response: 401, description: 'No autenticado'),
-            new OA\Response(response: 403, description: 'Sin permiso para reactivar este usuario'),
-            new OA\Response(response: 404, description: 'Usuario no encontrado'),
-        ]
+        responses: [new OA\Response(response: 200, description: 'Usuario reactivado')]
     )]
     public function restore(User $user): JsonResponse
     {
@@ -307,10 +265,21 @@ class UserController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => [
-                'id'       => $user->id,
-                'isActive' => $user->is_active,
-            ],
+            'data'    => ['id' => $user->id, 'isActive' => $user->is_active],
         ], 200);
+    }
+
+    private function toArray(User $user): array
+    {
+        return [
+            'id'             => $user->id,
+            'name'           => $user->name,
+            'email'          => $user->email,
+            'role'           => $user->role,
+            'organizationId' => $user->organization_id,
+            'healthCenterId' => $user->health_center_id,
+            'unitId'         => $user->unit_id,
+            'isActive'       => $user->is_active,
+        ];
     }
 }
