@@ -2,6 +2,7 @@
 use App\Http\Controllers\Api\V1\Auth\PatientAccessController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChatMessageController;
+use App\Http\Controllers\Api\V1\ConsentController;
 use App\Http\Controllers\Api\V1\HealthCenterController;
 use App\Http\Controllers\Api\V1\MedicalSessionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
@@ -33,6 +34,14 @@ Route::prefix('v1')->group(function () {
             ->middleware('session.active');
         Route::post('/messages/{message}/confirm', [ChatMessageController::class, 'confirm']);
         Route::post('/messages/{message}/read', [ChatMessageController::class, 'markAsRead']);
+
+        Route::get('/medical-sessions/{medicalSession}/consents', [ConsentController::class, 'index']);
+    });
+
+    Route::middleware(['auth:sanctum', 'patient.only'])->group(function () {
+        Route::post('/consent-requests/{consent}/approve', [ConsentController::class, 'approve']);
+        Route::post('/consent-requests/{consent}/reject', [ConsentController::class, 'reject']);
+        Route::post('/consent-requests/{consent}/revoke', [ConsentController::class, 'revoke']);
     });
 
     Route::middleware(['auth:sanctum', 'staff.only'])->group(function () {
@@ -71,6 +80,9 @@ Route::prefix('v1')->group(function () {
         Route::get('/patients', [PatientController::class, 'index']);
         Route::get('/patients/{patient}', [PatientController::class, 'show']);
         Route::post('/attention-codes/validate', [TemporaryAccessCodeController::class, 'validateCode']);
+
+        Route::post('/medical-sessions/{medicalSession}/consent-requests', [ConsentController::class, 'store'])
+            ->middleware('session.active');
 
         Route::post('/pictograms', [PictogramController::class, 'store']);
         Route::patch('/pictograms/{pictogram}', [PictogramController::class, 'update']);
