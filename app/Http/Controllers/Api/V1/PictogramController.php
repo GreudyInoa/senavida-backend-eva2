@@ -113,6 +113,22 @@ class PictogramController extends Controller
         summary: 'Crear un pictograma',
         tags: ['Pictogramas'],
         security: [['bearerAuth' => []]],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['pictogramCategoryId', 'title', 'phrase', 'speechText', 'emoji', 'severity'],
+                properties: [
+                    new OA\Property(property: 'pictogramCategoryId', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'title', type: 'string'),
+                    new OA\Property(property: 'phrase', type: 'string'),
+                    new OA\Property(property: 'speechText', type: 'string'),
+                    new OA\Property(property: 'emoji', type: 'string'),
+                    new OA\Property(property: 'severity', type: 'string', enum: ['critical', 'warning', 'info', 'neutral']),
+                    new OA\Property(property: 'isActive', type: 'boolean'),
+                    new OA\Property(property: 'sortOrder', type: 'integer'),
+                ]
+            )
+        ),
         responses: [new OA\Response(response: 201, description: 'Pictograma creado correctamente')]
     )]
     public function store(StorePictogramRequest $request): JsonResponse

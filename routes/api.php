@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\Auth\PatientAccessController;
+use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChatMessageController;
 use App\Http\Controllers\Api\V1\ConsentController;
@@ -90,6 +91,8 @@ Route::prefix('v1')->group(function () {
         Route::patch('/pictograms/{pictogram}', [PictogramController::class, 'update']);
         Route::delete('/pictograms/{pictogram}', [PictogramController::class, 'destroy']);
         Route::patch('/pictograms/{pictogram}/restore', [PictogramController::class, 'restore']);
+
+        Route::get('/audit-logs', [AuditLogController::class, 'index']);
 
         Route::get('/security-settings', [SecuritySettingController::class, 'show']);
         Route::put('/security-settings', [SecuritySettingController::class, 'update']);

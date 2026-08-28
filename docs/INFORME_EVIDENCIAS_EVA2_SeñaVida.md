@@ -23,7 +23,7 @@
 | 🔗 **Repositorio** | [`GreudyInoa/senavida-backend-eva2`](https://github.com/GreudyInoa/senavida-backend-eva2) |
 | ⚙️ **Stack** | Laravel 13 · PHP 8.4 · PostgreSQL · Laravel Sanctum |
 | 📅 **Entrega EVA2** | 17 de agosto de 2026 |
-| 🔄 **Última actualización** | 28 de agosto de 2026 — Fase 6, Hitos 6.0, 6.1 y 6.2 **completos** (Pictogramas + Usuarios + Configuración de seguridad) |
+| 🔄 **Última actualización** | 28 de agosto de 2026 — Fase 6, Hitos 6.0 a 6.3 **completos** (Pictogramas + Usuarios + Configuración de seguridad + Auditoría) |
 
 ---
 
@@ -79,6 +79,7 @@
     - 15.1 Hito 6.0 — CRUD completo de Pictogramas (5 bugs encontrados y corregidos)
     - 15.2 Hito 6.1 — Gestión de usuarios (corrección de escalación de privilegios crítica)
     - 15.3 Hito 6.2 — Parámetros de seguridad (`security_settings`), CTA conectado en tiempo real
+    - 15.4 Hito 6.3 — Consulta de auditoría (`audit-logs`), severidad y aislamiento por centro
 
 **Cierre**
 
@@ -1937,6 +1938,53 @@ Verificado directamente en la base de datos vía Tinker que este código nació 
 *`PUT /security-settings` con `ctaMaxAttempts: 15`, fuera del rango permitido (1–10) — `422 Unprocessable Content`. Evita que un centro quede con una protección contra fuerza bruta anulada por un valor absurdo.*
 
 **Estado tras la verificación:** la configuración del centro de prueba fue restaurada a `cta_max_attempts: 3` (su valor original) por Tinker al finalizar.
+
+### 15.4 Hito 6.3 — Consulta de auditoría (`audit-logs`)
+
+**El punto de partida.** La tabla `audit_logs` y el `AuditLogObserver` existían desde la Fase 0, registrando eventos automáticamente sobre `HealthCenter`, `Organization`, `Patient`, `PatientContact`, `TemporaryAccessCode`, `Unit` y `User`. Faltaba, sin embargo, el endpoint de consulta — y una revisión contra el contrato reveló dos brechas más profundas antes de poder construirlo con honestidad.
+
+**Brecha 1 — campos obligatorios del contrato ausentes.** El contrato (§19.2) exige `healthCenterId` (aislamiento por centro) y `severity` (`info`/`warning`/`critical`) como campos obligatorios de todo evento de auditoría. Ninguno existía en la tabla. Sin `healthCenterId`, un `admin_institucional` habría podido ver la actividad de **todos** los hospitales del sistema al consultar la bitácora — una fuga de datos entre centros, exactamente lo que el resto del proyecto se cuida de evitar.
+
+**Brecha 2 — modelos sensibles sin auditar.** `Pictogram`, `PictogramCategory`, `SecuritySetting` y `Consent` no estaban conectados al observador. La revocación de un consentimiento, que el contrato marca explícitamente como evento crítico de auditoría (§13.7), no dejaba ningún rastro.
+
+**Decisión de diseño — clasificación de severidad con criterio real.** En vez de asignar `severity: 'info'` de forma fija a todo evento (lo que habría sido, otra vez, una función decorativa), se implementó una regla de negocio centralizada en el propio `AuditLogObserver`:
+
+| Condición | Severidad |
+|---|---|
+| Un `Consent` cambia su estado a `revoked` | `critical` — exigencia explícita del contrato |
+| Un `TemporaryAccessCode` se bloquea por intentos fallidos | `warning` |
+| Se modifica (no se crea) un modelo estructural: `User`, `Organization`, `HealthCenter`, `Unit`, `SecuritySetting` | `warning` |
+| Cualquier otro evento | `info` |
+
+**Decisión de diseño — cómo se deriva el centro de cada evento.** Como el contrato limita el acceso a la bitácora exclusivamente a `admin_institucional` (ni siquiera `super_admin` accede, §13.7), lo relevante es "qué hizo mi propio personal, o qué le pasó a mis propios pacientes" — no perseguir una relación distinta por cada tabla. Se implementó una resolución en cascada: primero se usa la columna `health_center_id` propia del modelo si existe; si no, se hereda de la `MedicalSession` asociada (caso de `Consent`); como último recurso, se usa el centro del actor que ejecuta la acción.
+
+**Bug encontrado durante la verificación — `Auth::id()` falla con pacientes.** Al probar la revocación de un consentimiento (acción que ejecuta el propio paciente, no el personal), el observador lanzó un `500 Internal Server Error`: `Auth::id()` invoca `getAuthIdentifier()`, método que el modelo `Patient` no implementa por completo. La corrección obtiene el actor de forma segura, verificando su tipo antes de leer su `id`, de modo que un evento disparado por un paciente se registra igual, simplemente sin `userId` asociado.
+
+**Evidencia de ejecución real, desde Swagger:**
+
+![Pictograma creado, evento generado](capturas/103_pictogram_creado_evento_generado_201.png)
+
+*`POST /pictograms` — `201 Created`. Este evento alimenta la siguiente prueba.*
+
+![Evento info visible en la bitácora](capturas/104_audit_logs_evento_info_200.png)
+
+*`GET /audit-logs` — el evento de creación del pictograma aparece con `severity: "info"`, `resourceType: "Pictogram"` y el nombre real del administrador que lo creó.*
+
+![Consentimiento revocado por el paciente](capturas/105_consent_revocado_por_paciente_200.png)
+
+*`POST /consent-requests/{id}/revoke`, ejecutado con un token de **paciente** — `200 OK`. Esta es la acción que expuso el bug de `Auth::id()`, corregido antes de esta captura.*
+
+![Aislamiento por centro: el filtro no traspasa hospitales](capturas/106_audit_logs_aislamiento_centro_incorrecto_vacio.png)
+
+*`GET /audit-logs?severity=critical` consultado por el admin de un centro **distinto** al del consentimiento revocado — `total: 0`. Confirma que el filtro implícito de aislamiento por centro nunca se puede saltar, ni siquiera con un filtro explícito válido.*
+
+![Evento crítico visible para el centro correcto](capturas/107_audit_logs_evento_critical_centro_correcto_200.png)
+
+*El mismo filtro, consultado por el admin del centro correcto — `total: 1`, `severity: "critical"`, `action: "updated"`, `resourceType: "Consent"`. `userId: null` porque el actor fue un paciente, no un miembro del personal — comportamiento esperado tras la corrección del bug.*
+
+**Limitación conocida, documentada explícitamente.** El contrato (§15.4) sugiere un filtro `patientId` para `/audit-logs`, que no se implementó: el esquema actual de `audit_logs` vincula el evento a su entidad mediante `auditable_type`/`auditable_id` (relación polimórfica), sin una columna directa de paciente. Añadir ese filtro requeriría cambios de esquema adicionales, fuera del alcance de este hito.
+
+**Estado tras la verificación:** el pictograma y los dos consentimientos de prueba fueron eliminados por Tinker al finalizar; el token de paciente generado manualmente para la prueba fue revocado.
 
 ---
 

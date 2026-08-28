@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Observers\AuditLogObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
+
 use App\Enums\ConsentStatus;
 use App\Enums\ConsentType;
 use App\Exceptions\ApiException;
@@ -9,6 +12,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+#[ObservedBy([AuditLogObserver::class])]
 class Consent extends Model
 {
     use HasUuids;
