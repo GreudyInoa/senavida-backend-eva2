@@ -26,3 +26,8 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 /storage/api-docs
+
+# Archivos temporales de depuracion/verificacion durante pruebas manuales
+swagger_check.json
+*_test.json
+verify_*.php
