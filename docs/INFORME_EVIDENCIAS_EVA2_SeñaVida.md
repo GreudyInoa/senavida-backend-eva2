@@ -23,7 +23,7 @@
 | 🔗 **Repositorio** | [`GreudyInoa/senavida-backend-eva2`](https://github.com/GreudyInoa/senavida-backend-eva2) |
 | ⚙️ **Stack** | Laravel 13 · PHP 8.4 · PostgreSQL · Laravel Sanctum |
 | 📅 **Entrega EVA2** | 17 de agosto de 2026 |
-| 🔄 **Última actualización** | 27 de agosto de 2026 — Fase 6, Hitos 6.0 y 6.1 **completos** (CRUD de Pictogramas + Gestión de usuarios) |
+| 🔄 **Última actualización** | 28 de agosto de 2026 — Fase 6, Hitos 6.0, 6.1 y 6.2 **completos** (Pictogramas + Usuarios + Configuración de seguridad) |
 
 ---
 
@@ -78,6 +78,7 @@
 15. [Fase 6 — Administración (en progreso)](#15-fase-6--administración-en-progreso)
     - 15.1 Hito 6.0 — CRUD completo de Pictogramas (5 bugs encontrados y corregidos)
     - 15.2 Hito 6.1 — Gestión de usuarios (corrección de escalación de privilegios crítica)
+    - 15.3 Hito 6.2 — Parámetros de seguridad (`security_settings`), CTA conectado en tiempo real
 
 **Cierre**
 
@@ -1896,6 +1897,46 @@ Esta categoría de vulnerabilidad está señalada explícitamente en `BACKEND_IM
 **Paginación y filtros del listado, según contrato §14.6 y §15.4.** `GET /users` ahora responde con el envoltorio `meta.pagination` (total, página actual, última página) y admite filtros por `role`, `healthCenterId`, `unitId`, `isActive`, además de `sort` (por defecto `name`). Verificado con `GET /users` (7 usuarios del propio centro, paginados de a 25) y `GET /users?role=medico` (2 resultados, ambos con `role: "medico"`).
 
 **Estado tras la verificación:** el usuario de prueba creado durante las pruebas (`enfermero.valido.prueba@test.com`) fue eliminado por Tinker al finalizar.
+
+### 15.3 Hito 6.2 — Parámetros de seguridad (`security_settings`)
+
+**El problema.** El límite de intentos fallidos del CTA estaba escrito directamente en el código (`'max_attempts' => 3`, un número fijo), en vez de ser una configuración que cada centro de salud pudiera ajustar según su propia política de seguridad. La decisión de diseño D-14 (registrada al planear la Fase 6) estableció que estos parámetros deben ser **por centro de salud**, no globales ni por organización — coherente con que el resto del sistema ya aplica multitenancy por centro.
+
+**Alcance deliberadamente acotado.** Se evaluó incluir también un campo `session_timeout_minutes`, pero se descartó para este hito: no existe hoy ninguna lógica en el sistema que revise el tiempo de inactividad de una atención para cerrarla automáticamente. Construir el campo sin esa lógica habría producido una configuración decorativa — el administrador cambiaría un número creyendo que protege algo, sin ningún efecto real. Se prefirió entregar un solo parámetro **completamente funcional** (`cta_max_attempts`) antes que dos, uno de ellos hueco. El timeout de sesión queda para un hito posterior, junto con el mecanismo que lo consuma.
+
+**Diseño de la conexión real.** El valor no se lee en tiempo real cada vez que se valida un código: se copia al propio CTA en el momento en que se genera. Esto preserva una decisión de diseño ya existente desde la Fase 4 — cada código conserva el límite con el que nació, así que un cambio posterior en la configuración nunca altera retroactivamente códigos ya emitidos.
+
+**Bug encontrado durante la verificación — orden de autorización.** El endpoint `GET /security-settings` intentaba crear el registro de configuración (`firstOrCreate`) *antes* de verificar el rol de quien preguntaba. Como `super_admin` es un rol libre sin centro asociado (`health_center_id` es `null` para esa cuenta), el intento de inserción violaba la restricción `NOT NULL` de la columna a nivel de base de datos, produciendo un `500 Internal Server Error` en vez de un `403` controlado. Se corrigió invirtiendo el orden: primero se verifica el rol, y solo si corresponde se toca la base de datos.
+
+**Evidencia de ejecución real, desde Swagger:**
+
+![Configuración por defecto autocreada](capturas/97_security_settings_default_200.png)
+
+*`GET /security-settings` en la primera consulta del centro — `200 OK` con `ctaMaxAttempts: 3`, el valor por defecto, creado automáticamente sin que nadie tuviera que inicializarlo a mano.*
+
+![Actualización del límite](capturas/98_security_settings_actualizar_200.png)
+
+*`PUT /security-settings` cambiando el límite a `5` — `200 OK`, mismo `id` de registro, confirmando que actualizó la fila existente en vez de crear una nueva.*
+
+![CTA generado tras el cambio](capturas/99_cta_generado_201.png)
+
+*`POST /patients/{id}/attention-codes` (endpoint público) generando un código nuevo después del cambio de configuración.*
+
+Verificado directamente en la base de datos vía Tinker que este código nació con `max_attempts = 5` — el valor configurado, no el `3` que tenía el código antes de escribir esta conexión. Esta es la evidencia central del hito: confirma que la configuración no es solo un valor que se guarda, sino que efectivamente altera el comportamiento del sistema.
+
+![Bug encontrado: 500 en vez de 403](capturas/100_security_settings_bug_500_super_admin.png)
+
+*`GET /security-settings` con el token de `super_admin`, **antes** de la corrección — `500 Internal Server Error` por violación de restricción `NOT NULL`, en vez del `403` que correspondía. Se documenta el bug junto con su corrección como parte del proceso real de desarrollo.*
+
+![Bug corregido: 403 limpio](capturas/101_security_settings_forbidden_403.png)
+
+*Mismo endpoint, mismo token de `super_admin`, después de invertir el orden de verificación — `403 FORBIDDEN_ROLE`, respuesta controlada y consistente con el resto del sistema.*
+
+![Validación de rango](capturas/102_security_settings_rango_422.png)
+
+*`PUT /security-settings` con `ctaMaxAttempts: 15`, fuera del rango permitido (1–10) — `422 Unprocessable Content`. Evita que un centro quede con una protección contra fuerza bruta anulada por un valor absurdo.*
+
+**Estado tras la verificación:** la configuración del centro de prueba fue restaurada a `cta_max_attempts: 3` (su valor original) por Tinker al finalizar.
 
 ---
 

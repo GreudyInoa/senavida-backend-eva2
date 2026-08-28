@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PatientController;
 use App\Http\Controllers\Api\V1\PictogramCategoryController;
 use App\Http\Controllers\Api\V1\PictogramController;
+use App\Http\Controllers\Api\V1\SecuritySettingController;
 use App\Http\Controllers\Api\V1\TemporaryAccessCodeController;
 use App\Http\Controllers\Api\V1\UnitController;
 use App\Http\Controllers\Api\V1\UserController;
@@ -89,6 +90,9 @@ Route::prefix('v1')->group(function () {
         Route::patch('/pictograms/{pictogram}', [PictogramController::class, 'update']);
         Route::delete('/pictograms/{pictogram}', [PictogramController::class, 'destroy']);
         Route::patch('/pictograms/{pictogram}/restore', [PictogramController::class, 'restore']);
+
+        Route::get('/security-settings', [SecuritySettingController::class, 'show']);
+        Route::put('/security-settings', [SecuritySettingController::class, 'update']);
 
         Route::post('/pictogram-categories', [PictogramCategoryController::class, 'store']);
         Route::patch('/pictogram-categories/{pictogramCategory}', [PictogramCategoryController::class, 'update']);

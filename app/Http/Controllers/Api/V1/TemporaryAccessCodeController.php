@@ -6,6 +6,7 @@ use App\Exceptions\ApiException;
 use OpenApi\Attributes as OA;
 use App\Http\Controllers\Controller;
 use App\Models\Patient;
+use App\Models\SecuritySetting;
 use App\Models\TemporaryAccessCode;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -74,6 +75,15 @@ class TemporaryAccessCodeController extends Controller
         // 4. Generar el codigo y guardar SOLO su hash
         $plainCode = TemporaryAccessCode::generateCode();
 
+        // El limite de intentos se lee de la configuracion del centro en
+        // este preciso momento. Un cambio posterior en security_settings
+        // NO afecta a este codigo ya emitido - cada CTA conserva el
+        // limite con el que nacio (decision de diseÃ±o ya establecida).
+        $maxAttempts = SecuritySetting::firstOrCreate(
+            ['health_center_id' => $data['health_center_id']],
+            ['cta_max_attempts' => 3]
+        )->cta_max_attempts;
+
         $cta = TemporaryAccessCode::create([
             'patient_id'       => $patient->id,
             'health_center_id' => $data['health_center_id'],
@@ -81,7 +91,7 @@ class TemporaryAccessCodeController extends Controller
             'status'           => 'active',
             'expires_at'       => now()->addHour(),
             'failed_attempts'  => 0,
-            'max_attempts'     => 3,
+            'max_attempts'     => $maxAttempts,
         ]);
 
         // 5. Responder con el codigo EN CLARO, esta unica vez
