@@ -28,6 +28,13 @@ return Application::configure(basePath: dirname(__DIR__))
             'patient.only'   => \App\Http\Middleware\EnsurePatientToken::class,
             'staff.only'     => \App\Http\Middleware\EnsureStaffToken::class,
         ]);
+
+        // Cuenta cada peticion a la API para /admin/stats. Se aplica a
+        // TODAS las rutas api/*, incluidas las publicas, porque el conteo
+        // de trafico no depende de si el usuario esta autenticado.
+        $middleware->api(prepend: [
+            \App\Http\Middleware\TrackApiRequests::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

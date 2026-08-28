@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/Swagger-OpenAPI%203.0-85EA2D?style=flat-square&logo=swagger&logoColor=black" alt="Swagger OpenAPI 3.0"/>
   <img src="https://img.shields.io/badge/Rúbrica-100%2F100-brightgreen?style=flat-square" alt="Rúbrica 100/100"/>
   <img src="https://img.shields.io/badge/Fase%205-COMPLETA-2E7D32?style=flat-square" alt="Fase 5 completa"/>
-  <img src="https://img.shields.io/badge/Fase%206-Hito%206.0%20completo-1976D2?style=flat-square" alt="Fase 6 en progreso"/>
+  <img src="https://img.shields.io/badge/Fase%206-COMPLETA-2E7D32?style=flat-square" alt="Fase 6 completa"/>
 </p>
 
 > Evidencia completa de funcionamiento del backend de **SeñaVida**, probada endpoint por endpoint con **Postman** y **Swagger UI**, y verificada a nivel de base de datos con **Tinker**. Este documento acompaña la entrega del **EVA2** y demuestra, con capturas reales (no simuladas), que el proyecto cumple cada indicador de la rúbrica.
@@ -23,7 +23,7 @@
 | 🔗 **Repositorio** | [`GreudyInoa/senavida-backend-eva2`](https://github.com/GreudyInoa/senavida-backend-eva2) |
 | ⚙️ **Stack** | Laravel 13 · PHP 8.4 · PostgreSQL · Laravel Sanctum |
 | 📅 **Entrega EVA2** | 17 de agosto de 2026 |
-| 🔄 **Última actualización** | 28 de agosto de 2026 — Fase 6, Hitos 6.0 a 6.3 **completos** (Pictogramas + Usuarios + Configuración de seguridad + Auditoría) |
+| 🔄 **Última actualización** | 28 de agosto de 2026 — Fase 6 **completa** (Hitos 6.0 a 6.4: Pictogramas, Usuarios, Configuración de seguridad, Auditoría, Estadísticas y exportación firmada) |
 
 ---
 
@@ -80,6 +80,7 @@
     - 15.2 Hito 6.1 — Gestión de usuarios (corrección de escalación de privilegios crítica)
     - 15.3 Hito 6.2 — Parámetros de seguridad (`security_settings`), CTA conectado en tiempo real
     - 15.4 Hito 6.3 — Consulta de auditoría (`audit-logs`), severidad y aislamiento por centro
+    - 15.5 Hito 6.4 — `/admin/stats` y exportación firmada (HMAC-SHA256) — **Fase 6 completa**
 
 **Cierre**
 
@@ -1985,6 +1986,56 @@ Verificado directamente en la base de datos vía Tinker que este código nació 
 **Limitación conocida, documentada explícitamente.** El contrato (§15.4) sugiere un filtro `patientId` para `/audit-logs`, que no se implementó: el esquema actual de `audit_logs` vincula el evento a su entidad mediante `auditable_type`/`auditable_id` (relación polimórfica), sin una columna directa de paciente. Añadir ese filtro requeriría cambios de esquema adicionales, fuera del alcance de este hito.
 
 **Estado tras la verificación:** el pictograma y los dos consentimientos de prueba fueron eliminados por Tinker al finalizar; el token de paciente generado manualmente para la prueba fue revocado.
+
+### 15.5 Hito 6.4 — `/admin/stats` y exportación firmada de logs
+
+**El problema declarado por el propio contrato.** El requisito funcional RF-012 es inusualmente honesto: *"Las tres cifras están escritas a mano en el código y nunca cambian."* El hito exigía calcular tres valores reales — `activeUsers`, `apiRequests`, `auditCoverage` — donde ninguno existía como número calculado.
+
+**`activeUsers`** se resolvió de forma directa: conteo de usuarios activos, acotado al centro del admin, mismo patrón de aislamiento usado en toda la Fase 6.
+
+**`apiRequests` requirió infraestructura nueva.** No existía ningún mecanismo que contara peticiones a la API. Se construyó un middleware (`TrackApiRequests`) que incrementa un contador en caché (ventana de 24 horas) en cada petición. Una decisión de diseño relevante: el middleware se colocó **antes** de la autenticación (`prepend`, no `append`), para que el conteo refleje tráfico real — incluidas peticiones rechazadas por falta de token, que son justamente las que interesa poder ver en volumen (por ejemplo, ante un intento de fuerza bruta).
+
+**`auditCoverage` se calculó con reflexión de PHP, no como cifra fija.** En vez de escribir `100` a mano, el sistema inspecciona en tiempo real, usando `ReflectionClass`, qué porcentaje de los modelos considerados sensibles tienen efectivamente el atributo `#[ObservedBy(AuditLogObserver::class)]`. Esto convierte el número en una auto-verificación genuina: si en el futuro se agrega un modelo sensible y alguien olvida conectar el observador, la cifra baja automáticamente por debajo de 100, en vez de mentir silenciosamente.
+
+**Hueco encontrado durante el diseño de esa métrica.** Calcular `auditCoverage` con honestidad exigió primero auditar qué modelos *no* estaban cubiertos. Se encontró que `MedicalSession` — descrita en el propio contrato como *"raíz de todo el dominio clínico"* — nunca había sido conectada al observador, pese a que el contrato lista explícitamente como acciones auditables iniciar, avanzar y cerrar una atención. Se conectó antes de calcular la métrica, para que el número resultante fuera real y no artificialmente inflado por omisión.
+
+**Segundo requisito del contrato, encontrado en la relectura de §13.7.** *"La consulta de la bitácora también se audita."* No solo modificar datos: **mirarlos** también debe dejar rastro. Como una simple lectura no dispara ningún evento de Eloquent, se agregó un registro manual (`viewed_audit_log`, `exported_audit_log`) directamente en el controlador, para las dos acciones de acceso a la bitácora.
+
+**Exportación firmada — decisión D-30 implementada.** Se generó una clave de firma (`AUDIT_EXPORT_SIGNING_KEY`, 32 bytes aleatorios) separada de `APP_KEY`, para que una eventual rotación de esta última no invalide silenciosamente firmas de exportaciones ya emitidas. El endpoint `POST /audit-logs/export` serializa el conjunto completo de eventos del centro en un JSON de bytes fijos y calcula sobre ellos un HMAC-SHA256. La firma con certificado digital, de mayor peso legal, queda explícitamente diferida a una fase posterior — documentado como decisión académica, no como funcionalidad ausente por descuido.
+
+**Verificación rigurosa de la firma.** Se capturó la respuesta real del servidor byte por byte (sin copiar y pegar manualmente, para no introducir diferencias de formato) y se recalculó el HMAC de forma completamente independiente, en un script PHP separado que lee el archivo exportado y usa la misma clave de configuración. El resultado coincidió exactamente:
+
+```
+Firma recalculada: 782a3e8429717e0474c9e3dc24fc569b02e13f43a956baa09cc080df471d506f
+Firma del archivo: 782a3e8429717e0474c9e3dc24fc569b02e13f43a956baa09cc080df471d506f
+Coinciden: SI
+```
+
+Esta prueba es la evidencia central del hito: demuestra que la firma no es un campo decorativo en la respuesta, sino un mecanismo criptográfico verificable de forma independiente al propio servidor que la generó.
+
+**Evidencia de ejecución real, desde Swagger:**
+
+![Estadísticas calculadas en vivo](capturas/108_admin_stats_calculadas_200.png)
+
+*`GET /admin/stats` — `200 OK` con `activeUsers`, `apiRequests` y `auditCoverage: 100`, ninguno escrito a mano.*
+
+![El contador de peticiones incrementa con el uso real](capturas/109_admin_stats_contador_incrementa_200.png)
+
+*Segunda consulta al mismo endpoint — `apiRequests` subió respecto a la captura anterior, confirmando que el middleware cuenta tráfico real en cada petición, no un valor congelado.*
+
+![Bloqueo de rol para Super Admin](capturas/110_admin_stats_forbidden_super_admin_403.png)
+
+*`GET /admin/stats` con el token de `super_admin` — `403 FORBIDDEN_ROLE`. Estas estadísticas son operación de un centro específico, exclusivas de `admin_institucional`.*
+
+![Exportación firmada](capturas/111_audit_logs_export_firmado_200.png)
+
+*`POST /audit-logs/export` — `200 OK` con el payload completo, `signatureAlgo: "HMAC-SHA256"` y la firma calculada. La verificación independiente de esta firma se documenta arriba.*
+
+**Estado tras la verificación:** los archivos temporales usados para la verificación de la firma (`export_test.json`, `verify_signature.php`) fueron eliminados del entorno local al finalizar. Los registros de auditoría generados durante las pruebas de este hito **no fueron eliminados**: el contrato exige que la bitácora sea inmutable — solo escritura y lectura —, por lo que forman parte del historial real del sistema, igual que en producción.
+
+---
+
+**Cierre de la Fase 6 — Administración.** Con este hito se completan los cinco pilares planeados: mantenimiento de catálogos (6.0), gestión de usuarios con jerarquía de roles protegida (6.1), configuración de seguridad conectada en tiempo real (6.2), bitácora de auditoría con clasificación de severidad y aislamiento por centro (6.3), y estadísticas verificables más exportación firmada (6.4). A lo largo de la fase se encontraron y corrigieron 9 bugs reales — varios de ellos de seguridad (escalación de privilegios, fallas de autorización que exponían errores de servidor) — todos verificados con evidencia HTTP antes y después de la corrección.
 
 ---
 

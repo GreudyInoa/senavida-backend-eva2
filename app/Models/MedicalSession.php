@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Observers\AuditLogObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
+
 use App\Enums\ConsentStatus;
 use App\Enums\MedicalSessionStatus;
 use App\Services\SystemMessageService;
@@ -12,6 +15,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+#[ObservedBy([AuditLogObserver::class])]
 class MedicalSession extends Model
 {
     use HasFactory, HasUuids;

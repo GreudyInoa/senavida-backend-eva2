@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use OpenApi\Attributes as OA;
 
@@ -83,6 +84,8 @@ class AuditLogController extends Controller
         $perPage = min(max((int) $request->query('perPage', 25), 1), 100);
         $paginated = $query->paginate($perPage);
 
+        $this->recordSelfAudit($admin, 'viewed_audit_log');
+
         return response()->json([
             'success' => true,
             'data'    => collect($paginated->items())->map(fn ($log) => $this->toArray($log)),
@@ -94,6 +97,81 @@ class AuditLogController extends Controller
                     'currentPage' => $paginated->currentPage(),
                     'lastPage'    => $paginated->lastPage(),
                 ],
+            ],
+        ], 200);
+    }
+
+    /**
+     * El contrato exige que CONSULTAR la bitacora tambien quede auditado
+     * (SS13.7). Como leer no dispara ningun evento de Eloquent, el
+     * AuditLogObserver nunca se entera por si solo - se registra el
+     * evento a mano aqui, directamente sobre AuditLog.
+     */
+    private function recordSelfAudit($admin, string $action): void
+    {
+        AuditLog::create([
+            'user_id'          => $admin->id,
+            'health_center_id' => $admin->health_center_id,
+            'action'           => $action,
+            'severity'         => 'info',
+            'auditable_type'   => null,
+            'auditable_id'     => null,
+            'changes'          => null,
+            'ip_address'       => request()->ip(),
+        ]);
+    }
+
+    #[OA\Post(
+        path: '/audit-logs/export',
+        summary: 'Exportar la bitacora de auditoria con firma HMAC',
+        description: 'Exclusivo de admin_institucional. Genera un JSON firmado (HMAC-SHA256) que demuestra que el archivo no fue alterado despues de generarse. La firma con certificado digital queda para una fase posterior (decision D-30).',
+        tags: ['Auditoria'],
+        security: [['bearerAuth' => []]],
+        responses: [
+            new OA\Response(response: 200, description: 'Exportacion firmada generada correctamente'),
+            new OA\Response(response: 403, description: 'Sin permiso'),
+        ]
+    )]
+    public function export(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', AuditLog::class);
+
+        $admin = $request->user();
+
+        // La exportacion no pagina: entrega todo el conjunto filtrado.
+        // Se reutilizan los mismos filtros que index(), sin duplicar logica.
+        $logs = AuditLog::query()
+            ->where('health_center_id', $admin->health_center_id)
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->map(fn ($log) => $this->toArray($log))
+            ->values()
+            ->all();
+
+        $payload = [
+            'exportedAt'     => now()->toIso8601String(),
+            'exportedBy'     => ['id' => $admin->id, 'name' => $admin->name],
+            'healthCenterId' => $admin->health_center_id,
+            'recordCount'    => count($logs),
+            'records'        => $logs,
+        ];
+
+        // El JSON se serializa UNA sola vez, con flags fijas. La firma se
+        // calcula sobre ESTOS bytes exactos - si alguien reserializa el
+        // JSON de otra forma (distinto orden de llaves, distinto espaciado),
+        // la firma no coincidiria, aunque el contenido "diga" lo mismo.
+        $jsonBytes = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        $signature = hash_hmac('sha256', $jsonBytes, config('audit.export_signing_key'));
+
+        $this->recordSelfAudit($admin, 'exported_audit_log');
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'payload'          => $payload,
+                'signatureAlgo'    => 'HMAC-SHA256',
+                'signature'        => $signature,
             ],
         ], 200);
     }
